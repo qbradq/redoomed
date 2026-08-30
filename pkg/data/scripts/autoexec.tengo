@@ -1,0 +1,9 @@
+fmt := import("fmt")
+game := import("game")
+
+fmt.println("Welcome to ReDoomEd!")
+fmt.println("ReDoomEd is Copyright (c) 2026 Norman B. Lancaster.")
+fmt.println("http://github.com/qbradq/redoomed")
+fmt.println("Released under the terms of the MIT license.")
+
+game.StartMap("MAP01")
