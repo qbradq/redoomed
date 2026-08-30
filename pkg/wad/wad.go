@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 var (
@@ -193,4 +195,32 @@ func (w *WAD) GetLumpByIndex(index int) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// GetPatch loads and parses the named lump as a Doom Picture Patch.
+func (w *WAD) GetPatch(name string) (*Patch, error) {
+	data, err := w.GetLump(name)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatch(data)
+}
+
+// GetPatchImage loads a Doom patch lump by name and converts it to an *ebiten.Image
+// using palette 0 (normal palette) from the PLAYPAL lump.
+func (w *WAD) GetPatchImage(name string) (*ebiten.Image, error) {
+	patch, err := w.GetPatch(name)
+	if err != nil {
+		return nil, err
+	}
+
+	playpal, err := w.GetLump("PLAYPAL")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read PLAYPAL lump: %w", err)
+	}
+	if len(playpal) < 768 {
+		return nil, fmt.Errorf("PLAYPAL lump too short (%d bytes, expected >= 768)", len(playpal))
+	}
+
+	return patch.ToImage(playpal[:768])
 }

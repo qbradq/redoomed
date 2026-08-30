@@ -30,6 +30,7 @@ type App struct {
 	consoleMode   *mode.ConsoleMode
 	gameMode      *mode.GameMode
 	currentMode   mode.Mode
+	previousMode  mode.Mode
 	exitRequested bool
 }
 
@@ -74,6 +75,14 @@ func NewApp() *App {
 
 	// Initialize with Quake-style console mode using the 8x8 unscii font
 	app.consoleMode = mode.NewConsoleMode(app.consoleFont)
+	app.consoleMode.SetOnClose(func() {
+		app.ToggleConsole()
+	})
+
+	// Initialize GameMode with 7-layer stack
+	app.gameMode = mode.NewGameMode("", app.wadFile, func() {
+		app.ToggleConsole()
+	})
 
 	// Initialize Tengo REPL with exit and start_map handlers
 	repl := script.NewREPL(func() {
@@ -102,9 +111,29 @@ func NewApp() *App {
 	return app
 }
 
+// ToggleConsole toggles between ConsoleMode and GameMode (or the previous mode).
+func (a *App) ToggleConsole() {
+	if a.currentMode == a.consoleMode {
+		if a.previousMode != nil {
+			a.currentMode = a.previousMode
+		} else if a.gameMode != nil {
+			a.currentMode = a.gameMode
+		}
+	} else {
+		a.previousMode = a.currentMode
+		a.currentMode = a.consoleMode
+	}
+}
+
 // StartMap enters the game mode for the given map name and hides the console.
 func (a *App) StartMap(mapName string) {
-	a.gameMode = mode.NewGameMode(mapName)
+	if a.gameMode == nil {
+		a.gameMode = mode.NewGameMode(mapName, a.wadFile, func() {
+			a.ToggleConsole()
+		})
+	} else {
+		a.gameMode.SetMapName(mapName)
+	}
 	a.SetMode(a.gameMode)
 }
 

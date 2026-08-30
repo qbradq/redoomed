@@ -57,6 +57,13 @@ type ConsoleMode struct {
 	cmdHistoryIdx     int
 	savedCurrentInput string
 	cursorTick        int
+
+	onClose func()
+}
+
+// SetOnClose sets the callback invoked when the console is toggled closed (e.g. via tilde key).
+func (c *ConsoleMode) SetOnClose(fn func()) {
+	c.onClose = fn
 }
 
 // SetREPL assigns a Tengo REPL instance to the console and wires output to console.Print.
@@ -260,6 +267,14 @@ func isKeyRepeating(key ebiten.Key) bool {
 
 // Update handles keyboard input for navigation, editing, scrolling, and submission.
 func (c *ConsoleMode) Update() error {
+	// 0. Toggle close on Tilde / Grave accent key
+	if inpututil.IsKeyJustPressed(ebiten.KeyGraveAccent) {
+		if c.onClose != nil {
+			c.onClose()
+		}
+		return nil
+	}
+
 	c.cursorTick++
 
 	// 1. Scrolling keys (Page Up / Page Down)

@@ -5,11 +5,17 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 var (
 	// ErrInvalidPatch is returned when patch data cannot be parsed.
 	ErrInvalidPatch = errors.New("invalid Doom picture patch format")
+	// ErrInvalidPalette is returned when palette slice is less than 768 bytes.
+	ErrInvalidPalette = errors.New("palette must be at least 768 bytes")
 )
 
 type rawPatchHeader struct {
@@ -126,4 +132,25 @@ func (p *Patch) PixelAt(x, y int) (byte, bool) {
 	}
 	idx := y*p.Width + x
 	return p.Pixels[idx], p.Mask[idx]
+}
+
+// ToImage converts the patch to an *ebiten.Image using the provided 768-byte RGB palette.
+func (p *Patch) ToImage(palette []byte) (*ebiten.Image, error) {
+	if len(palette) < 768 {
+		return nil, ErrInvalidPalette
+	}
+	rgba := image.NewRGBA(image.Rect(0, 0, p.Width, p.Height))
+	for y := 0; y < p.Height; y++ {
+		for x := 0; x < p.Width; x++ {
+			palIdx, opaque := p.PixelAt(x, y)
+			if !opaque {
+				continue
+			}
+			pr := palette[int(palIdx)*3]
+			pg := palette[int(palIdx)*3+1]
+			pb := palette[int(palIdx)*3+2]
+			rgba.SetRGBA(x, y, color.RGBA{R: pr, G: pg, B: pb, A: 255})
+		}
+	}
+	return ebiten.NewImageFromImage(rgba), nil
 }

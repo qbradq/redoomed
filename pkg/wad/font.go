@@ -2,8 +2,6 @@ package wad
 
 import (
 	"fmt"
-	"image"
-	"image/color"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -57,22 +55,10 @@ func NewHUDFont(w *WAD) (*HUDFont, error) {
 			continue
 		}
 
-		// Convert patch to RGBA using the normal PLAYPAL palette (palette 0)
-		rgba := image.NewRGBA(image.Rect(0, 0, patch.Width, patch.Height))
-		for y := 0; y < patch.Height; y++ {
-			for x := 0; x < patch.Width; x++ {
-				palIdx, opaque := patch.PixelAt(x, y)
-				if !opaque {
-					continue
-				}
-				pr := playpalData[int(palIdx)*3]
-				pg := playpalData[int(palIdx)*3+1]
-				pb := playpalData[int(palIdx)*3+2]
-				rgba.SetRGBA(x, y, color.RGBA{R: pr, G: pg, B: pb, A: 255})
-			}
+		glyphImg, err := patch.ToImage(playpalData[:768])
+		if err != nil {
+			continue
 		}
-
-		glyphImg := ebiten.NewImageFromImage(rgba)
 
 		glyphs[r] = &Glyph{
 			Char:  r,

@@ -29,9 +29,18 @@ func TestNewApp(t *testing.T) {
 		t.Error("expected console font (unscii-8) to be loaded")
 	}
 
-	console, ok := app.CurrentMode().(*mode.ConsoleMode)
-	if !ok || console == nil {
-		t.Fatal("expected current mode to be *mode.ConsoleMode")
+	// Autoexec script runs game.StartMap("MAP01"), so active mode is GameMode
+	gameMode, ok := app.CurrentMode().(*mode.GameMode)
+	if !ok || gameMode == nil {
+		t.Fatalf("expected current mode to be *mode.GameMode after autoexec, got %T", app.CurrentMode())
+	}
+	if gameMode.MapName() != "MAP01" {
+		t.Errorf("expected map name 'MAP01', got %q", gameMode.MapName())
+	}
+
+	console := app.ConsoleMode()
+	if console == nil {
+		t.Fatal("expected app.ConsoleMode() to be non-nil")
 	}
 
 	// Verify autoexec.tengo output lines were printed to console
@@ -42,7 +51,7 @@ func TestNewApp(t *testing.T) {
 		t.Errorf("expected first line 'Welcome to ReDoomEd!', got %q", console.History()[0].Text)
 	}
 
-	// If autoexec.tengo produced an error (e.g. invalid method call), verify it was recorded in bright red
+	// If autoexec.tengo produced an error, verify it was recorded in bright red
 	lastLine := console.History()[len(console.History())-1]
 	if len(console.History()) > 4 {
 		if lastLine.Color != gfx.EGABrightRed {
@@ -53,14 +62,38 @@ func TestNewApp(t *testing.T) {
 	if err := app.Update(); err != nil {
 		t.Errorf("Update() returned error: %v", err)
 	}
+
+	screen := ebiten.NewImage(1280, 800)
+	app.Draw(screen)
+}
+
+func TestAppToggleConsole(t *testing.T) {
+	app := NewApp()
+
+	// Initial mode is GameMode after autoexec
+	if _, ok := app.CurrentMode().(*mode.GameMode); !ok {
+		t.Fatalf("expected initial mode to be GameMode, got %T", app.CurrentMode())
+	}
+
+	// Toggle to Console
+	app.ToggleConsole()
+	if _, ok := app.CurrentMode().(*mode.ConsoleMode); !ok {
+		t.Fatalf("expected mode after ToggleConsole to be ConsoleMode, got %T", app.CurrentMode())
+	}
+
+	// Toggle back to GameMode
+	app.ToggleConsole()
+	if _, ok := app.CurrentMode().(*mode.GameMode); !ok {
+		t.Fatalf("expected mode after second ToggleConsole to be GameMode, got %T", app.CurrentMode())
+	}
 }
 
 func TestAppExitCommand(t *testing.T) {
 	app := NewApp()
 
-	console, ok := app.CurrentMode().(*mode.ConsoleMode)
-	if !ok || console == nil {
-		t.Fatal("expected CurrentMode to be *mode.ConsoleMode")
+	console := app.ConsoleMode()
+	if console == nil {
+		t.Fatal("expected ConsoleMode to be non-nil")
 	}
 
 	repl := console.REPL()
@@ -84,9 +117,9 @@ func TestAppExitCommand(t *testing.T) {
 func TestAppStartMapCommand(t *testing.T) {
 	app := NewApp()
 
-	console, ok := app.CurrentMode().(*mode.ConsoleMode)
-	if !ok || console == nil {
-		t.Fatal("expected CurrentMode to be *mode.ConsoleMode initially")
+	console := app.ConsoleMode()
+	if console == nil {
+		t.Fatal("expected ConsoleMode to be non-nil")
 	}
 
 	repl := console.REPL()
@@ -94,7 +127,7 @@ func TestAppStartMapCommand(t *testing.T) {
 		t.Fatal("expected console REPL to be initialized")
 	}
 
-	// Execute game.StartMap("E1M1") through REPL (game was already imported in autoexec.tengo)
+	// Execute game.StartMap("E1M1") through REPL
 	_, err := repl.Eval(`game.StartMap("E1M1")`)
 	if err != nil {
 		t.Fatalf("Eval(game.StartMap) failed: %v", err)

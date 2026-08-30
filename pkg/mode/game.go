@@ -4,6 +4,8 @@ import (
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
+
+	"github.com/qbradq/redoomed/pkg/wad"
 )
 
 const (
@@ -13,19 +15,73 @@ const (
 	GameBufferHeight = 200
 )
 
-// GameMode represents the 3D game rendering and gameplay application mode.
+// GameMode represents the composite game application mode composed of a UI/rendering layer stack.
 type GameMode struct {
 	mapName string
 	buffer  *ebiten.Image
 	bgColor color.RGBA
+
+	// Ordered top to bottom
+	layers []Layer
+
+	// Direct layer handles
+	commonLayer       *CommonLayer
+	gameMenuLayer     *GameMenuLayer
+	gameControlsLayer *GameControlsLayer
+	hudLayer          *HUDLayer
+	miniMapLayer      *MiniMapLayer
+	levelViewLayer    *LevelViewLayer
+	intermissionLayer *IntermissionLayer
 }
 
-// NewGameMode creates a new stubbed GameMode instance for the specified map.
-func NewGameMode(mapName string) *GameMode {
+// NewGameMode creates a new GameMode instance with the 7-layer stack.
+func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
+	var titleImg *ebiten.Image
+	var stbarImg *ebiten.Image
+
+	if w != nil {
+		if img, err := w.GetPatchImage("TITLEPIC"); err == nil {
+			titleImg = img
+		} else if img, err := w.GetPatchImage("INTERPIC"); err == nil {
+			titleImg = img
+		}
+
+		if img, err := w.GetPatchImage("STBAR"); err == nil {
+			stbarImg = img
+		}
+	}
+
+	common := NewCommonLayer(onToggleConsole)
+	menu := NewGameMenuLayer()
+	controls := NewGameControlsLayer()
+	hud := NewHUDLayer(stbarImg)
+	miniMap := NewMiniMapLayer()
+	levelView := NewLevelViewLayer()
+	intermission := NewIntermissionLayer(titleImg)
+
+	// Layer stack ordered from top to bottom
+	layers := []Layer{
+		common,
+		menu,
+		controls,
+		hud,
+		miniMap,
+		levelView,
+		intermission,
+	}
+
 	return &GameMode{
-		mapName: mapName,
-		buffer:  ebiten.NewImage(GameBufferWidth, GameBufferHeight),
-		bgColor: color.RGBA{R: 10, G: 10, B: 15, A: 255},
+		mapName:           mapName,
+		buffer:            ebiten.NewImage(GameBufferWidth, GameBufferHeight),
+		bgColor:           color.RGBA{R: 0, G: 0, B: 0, A: 255},
+		layers:            layers,
+		commonLayer:       common,
+		gameMenuLayer:     menu,
+		gameControlsLayer: controls,
+		hudLayer:          hud,
+		miniMapLayer:      miniMap,
+		levelViewLayer:    levelView,
+		intermissionLayer: intermission,
 	}
 }
 
@@ -39,17 +95,99 @@ func (g *GameMode) SetMapName(name string) {
 	g.mapName = name
 }
 
-// Update advances the gameplay simulation state.
+// Layers returns the layer stack from top to bottom.
+func (g *GameMode) Layers() []Layer {
+	return g.layers
+}
+
+// CommonLayer returns the CommonLayer instance.
+func (g *GameMode) CommonLayer() *CommonLayer {
+	return g.commonLayer
+}
+
+// GameMenuLayer returns the GameMenuLayer instance.
+func (g *GameMode) GameMenuLayer() *GameMenuLayer {
+	return g.gameMenuLayer
+}
+
+// GameControlsLayer returns the GameControlsLayer instance.
+func (g *GameMode) GameControlsLayer() *GameControlsLayer {
+	return g.gameControlsLayer
+}
+
+// HUDLayer returns the HUDLayer instance.
+func (g *GameMode) HUDLayer() *HUDLayer {
+	return g.hudLayer
+}
+
+// MiniMapLayer returns the MiniMapLayer instance.
+func (g *GameMode) MiniMapLayer() *MiniMapLayer {
+	return g.miniMapLayer
+}
+
+// LevelViewLayer returns the LevelViewLayer instance.
+func (g *GameMode) LevelViewLayer() *LevelViewLayer {
+	return g.levelViewLayer
+}
+
+// IntermissionLayer returns the IntermissionLayer instance.
+func (g *GameMode) IntermissionLayer() *IntermissionLayer {
+	return g.intermissionLayer
+}
+
+// SetOnToggleConsole updates the console toggle handler in the common layer.
+func (g *GameMode) SetOnToggleConsole(fn func()) {
+	if g.commonLayer != nil {
+		g.commonLayer.SetOnToggleConsole(fn)
+	}
+}
+
+// Update advances the gameplay simulation state and propagates input top-to-bottom.
 func (g *GameMode) Update() error {
+	consumed := false
+	for _, layer := range g.layers {
+		if !layer.IsVisible() {
+			continue
+		}
+		if consumed {
+			continue
+		}
+		c, err := layer.Update()
+		if err != nil {
+			return err
+		}
+		if c {
+			consumed = true
+		}
+	}
 	return nil
 }
 
-// Draw renders the game mode buffer and composites it onto the target screen.
+// Draw renders the layer stack buffer and composites it onto the target screen.
 func (g *GameMode) Draw(screen *ebiten.Image) {
 	// 1. Clear offscreen game buffer
 	g.buffer.Fill(g.bgColor)
 
-	// 2. Composite 320x200 game buffer onto the native 1280x800 screen buffer
+	// 2. Determine lowest layer index to draw based on occlusion.
+	// If a visible layer prevents lower drawing, all layers below it are skipped.
+	lowestDrawnIdx := len(g.layers) - 1
+	for i := 0; i < len(g.layers); i++ {
+		l := g.layers[i]
+		if l.IsVisible() && l.PreventsLowerDrawing() {
+			lowestDrawnIdx = i
+			break
+		}
+	}
+
+	// 3. Render from bottom (lowestDrawnIdx) up to top (0)
+	for i := lowestDrawnIdx; i >= 0; i-- {
+		l := g.layers[i]
+		if l.IsVisible() {
+			l.Draw(g.buffer)
+		}
+	}
+
+	// 4. Composite 320x200 game buffer onto the native 1280x800 screen buffer
 	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
 	scaleX := float64(sw) / float64(GameBufferWidth)
 	scaleY := float64(sh) / float64(GameBufferHeight)
