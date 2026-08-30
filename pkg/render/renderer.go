@@ -3,6 +3,7 @@ package render
 import (
 	"image/color"
 	"math"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -464,12 +465,16 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 		return
 	}
 
-	// Texture and Flat references
+	// Texture, Flat, and Sky references
 	texMgr := mapData.Textures
-	var midTex, upperTex, lowerTex *wad.Texture
+	var midTex, upperTex, lowerTex, skyTex *wad.Texture
 	var floorFlat, ceilFlat *wad.Flat
 
+	isFrontSky := strings.HasPrefix(frontSec.CeilingPic, "F_SKY")
+	isBackSky := backSec != nil && strings.HasPrefix(backSec.CeilingPic, "F_SKY")
+
 	if texMgr != nil {
+		skyTex = texMgr.GetSkyTexture(mapData.Name)
 		if frontSide.MiddleTexture != "" && frontSide.MiddleTexture != "-" {
 			midTex, _ = texMgr.GetTexture(frontSide.MiddleTexture)
 		}
@@ -482,7 +487,7 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 		if frontSec.FloorPic != "" && frontSec.FloorPic != "-" {
 			floorFlat, _ = texMgr.GetFlat(frontSec.FloorPic)
 		}
-		if frontSec.CeilingPic != "" && frontSec.CeilingPic != "-" {
+		if !isFrontSky && frontSec.CeilingPic != "" && frontSec.CeilingPic != "-" {
 			ceilFlat, _ = texMgr.GetFlat(frontSec.CeilingPic)
 		}
 	}
@@ -538,14 +543,18 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 
 		if !isTwoSided || backSec == nil {
 			// One-sided solid wall
-			// 1. Ceiling span above frontCeilY
+			// 1. Ceiling / Sky span above frontCeilY
 			ceilDrawTop := r.ceilingClip[x] + 1
 			ceilDrawBottom := frontCeilY - 1
 			if ceilDrawBottom > r.floorClip[x]-1 {
 				ceilDrawBottom = r.floorClip[x] - 1
 			}
-			if ceilFlat != nil && texMgr != nil && ceilDrawBottom >= ceilDrawTop {
-				r.drawCeilingSpan(cam, x, ceilDrawTop, ceilDrawBottom, float64(frontSec.CeilingHeight), int(frontSec.LightLevel), ceilFlat, texMgr, palette)
+			if ceilDrawBottom >= ceilDrawTop {
+				if isFrontSky && skyTex != nil && texMgr != nil {
+					r.drawSkySpan(cam, x, ceilDrawTop, ceilDrawBottom, skyTex, texMgr, palette)
+				} else if ceilFlat != nil && texMgr != nil {
+					r.drawCeilingSpan(cam, x, ceilDrawTop, ceilDrawBottom, float64(frontSec.CeilingHeight), int(frontSec.LightLevel), ceilFlat, texMgr, palette)
+				}
 			}
 
 			// 2. Floor span below frontFloorY
@@ -624,8 +633,12 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 				if ceilDrawBottom > r.floorClip[x]-1 {
 					ceilDrawBottom = r.floorClip[x] - 1
 				}
-				if ceilFlat != nil && texMgr != nil && ceilDrawBottom >= ceilDrawTop {
-					r.drawCeilingSpan(cam, x, ceilDrawTop, ceilDrawBottom, float64(frontSec.CeilingHeight), int(frontSec.LightLevel), ceilFlat, texMgr, palette)
+				if ceilDrawBottom >= ceilDrawTop {
+					if isFrontSky && skyTex != nil && texMgr != nil {
+						r.drawSkySpan(cam, x, ceilDrawTop, ceilDrawBottom, skyTex, texMgr, palette)
+					} else if ceilFlat != nil && texMgr != nil {
+						r.drawCeilingSpan(cam, x, ceilDrawTop, ceilDrawBottom, float64(frontSec.CeilingHeight), int(frontSec.LightLevel), ceilFlat, texMgr, palette)
+					}
 				}
 
 				upperTop := frontCeilY
@@ -641,26 +654,31 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 				upperBottom = clampInt(upperBottom, 0, r.viewHeight-1)
 
 				if upperBottom >= upperTop {
-					for y := upperTop; y <= upperBottom; y++ {
-						var texV int
-						if ld.Flags&wad.LinedefDontPegTop != 0 {
-							// Upper unpegged: aligned to front ceiling
-							texV = int(math.Floor(float64(frontSec.CeilingHeight) + float64(frontSide.YOffset) - (cam.Z - (float64(y)-r.centerY)/scale)))
-						} else {
-							// Upper pegged: aligned to back ceiling
-							texV = int(math.Floor(float64(backSec.CeilingHeight) + float64(frontSide.YOffset) - (cam.Z - (float64(y)-r.centerY)/scale)))
-						}
-
-						var clr color.RGBA
-						if upperTex != nil {
-							palIdx, opaque := upperTex.PixelAt(texU, texV)
-							if opaque && texMgr != nil {
-								clr = palette[texMgr.MapColor(cmIdx, palIdx)]
+					if isFrontSky && isBackSky && skyTex != nil && texMgr != nil {
+						// Looking through two sky ceilings: draw sky across opening
+						r.drawSkySpan(cam, x, upperTop, upperBottom, skyTex, texMgr, palette)
+					} else {
+						for y := upperTop; y <= upperBottom; y++ {
+							var texV int
+							if ld.Flags&wad.LinedefDontPegTop != 0 {
+								// Upper unpegged: aligned to front ceiling
+								texV = int(math.Floor(float64(frontSec.CeilingHeight) + float64(frontSide.YOffset) - (cam.Z - (float64(y)-r.centerY)/scale)))
+							} else {
+								// Upper pegged: aligned to back ceiling
+								texV = int(math.Floor(float64(backSec.CeilingHeight) + float64(frontSide.YOffset) - (cam.Z - (float64(y)-r.centerY)/scale)))
 							}
-						} else {
-							clr = color.RGBA{R: 100, G: 100, B: 100, A: 255}
+
+							var clr color.RGBA
+							if upperTex != nil {
+								palIdx, opaque := upperTex.PixelAt(texU, texV)
+								if opaque && texMgr != nil {
+									clr = palette[texMgr.MapColor(cmIdx, palIdx)]
+								}
+							} else {
+								clr = color.RGBA{R: 100, G: 100, B: 100, A: 255}
+							}
+							r.setPixel(x, y, clr)
 						}
-						r.setPixel(x, y, clr)
 					}
 				}
 
@@ -674,8 +692,12 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 				if ceilDrawBottom > r.floorClip[x]-1 {
 					ceilDrawBottom = r.floorClip[x] - 1
 				}
-				if ceilFlat != nil && texMgr != nil && ceilDrawBottom >= ceilDrawTop {
-					r.drawCeilingSpan(cam, x, ceilDrawTop, ceilDrawBottom, float64(frontSec.CeilingHeight), int(frontSec.LightLevel), ceilFlat, texMgr, palette)
+				if ceilDrawBottom >= ceilDrawTop {
+					if isFrontSky && skyTex != nil && texMgr != nil {
+						r.drawSkySpan(cam, x, ceilDrawTop, ceilDrawBottom, skyTex, texMgr, palette)
+					} else if ceilFlat != nil && texMgr != nil {
+						r.drawCeilingSpan(cam, x, ceilDrawTop, ceilDrawBottom, float64(frontSec.CeilingHeight), int(frontSec.LightLevel), ceilFlat, texMgr, palette)
+					}
 				}
 
 				if frontCeilY > r.ceilingClip[x] {
@@ -749,6 +771,46 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 					r.floorClip[x] = clampInt(frontFloorY, -1, r.viewHeight)
 				}
 			}
+		}
+	}
+}
+
+func (r *Renderer) drawSkySpan(cam *Camera, x, yStart, yEnd int, skyTex *wad.Texture, texMgr *wad.TextureManager, palette [256]color.RGBA) {
+	if skyTex == nil || yStart > yEnd {
+		return
+	}
+	if yStart < 0 {
+		yStart = 0
+	}
+	if yEnd >= r.viewHeight {
+		yEnd = r.viewHeight - 1
+	}
+	if yStart > yEnd {
+		return
+	}
+
+	colAngle := r.colAngles[x]
+	// Screen right is clockwise (-colAngle), screen left is counter-clockwise (+colAngle)
+	rayAngle := cam.Angle*math.Pi/180.0 - colAngle
+	for rayAngle < 0 {
+		rayAngle += 2.0 * math.Pi
+	}
+	for rayAngle >= 2.0*math.Pi {
+		rayAngle -= 2.0 * math.Pi
+	}
+
+	// In Doom, 360 degrees covers 4 full repetitions (1024 units for a 256px wide texture)
+	// 2*pi radians -> 4 * skyTex.Width
+	skyU := int(math.Floor(rayAngle * (float64(skyTex.Width) * 4.0 / (2.0 * math.Pi))))
+
+	for y := yStart; y <= yEnd; y++ {
+		// Vertically aligned to screen row
+		skyV := y
+		palIdx, opaque := skyTex.PixelAt(skyU, skyV)
+		if opaque {
+			// Sky is always rendered full-bright (colormap 0)
+			clr := palette[texMgr.MapColor(0, palIdx)]
+			r.setPixel(x, y, clr)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
 )
 
@@ -241,21 +242,28 @@ func (tm *TextureManager) MapColor(colormapIndex int, palIndex byte) byte {
 	return tm.colormap[colormapIndex*256+int(palIndex)]
 }
 
-// LightToColormap maps Doom sector light level (0-255) and distance to a colormap level (0-31).
+// LightToColormap maps Doom sector light level (0-255) and distance to a colormap level (0-31),
+// providing rich dynamic contrast between brightly lit and deep shadow areas.
 func (tm *TextureManager) LightToColormap(lightLevel int, distance float64) int {
-	// Doom light level diminishing formula approximation
 	if lightLevel < 0 {
 		lightLevel = 0
 	} else if lightLevel > 255 {
 		lightLevel = 255
 	}
 
-	// Base colormap from sector light level: 255 -> 0, 0 -> 31
-	baseMap := (255 - lightLevel) / 8
+	// Normalized light [0.0, 1.0]
+	lightNorm := float64(lightLevel) / 255.0
 
-	// Distance attenuation: light diminishes as distance increases
-	distOffset := int(distance / 64.0)
-	cm := baseMap + distOffset
+	// Dynamic range expansion:
+	// Maps lightLevel [0..255] across colormap index [0..31]
+	// High light levels (>200) map close to 0 (bright)
+	// Low light levels (<100) drop smoothly to deep darkness (24..31)
+	baseLevel := (1.0 - math.Pow(lightNorm, 1.25)) * 31.0
+
+	// Distance attenuation: light diminishes more slowly in brightly lit sectors
+	distFalloff := distance / (140.0 + lightNorm*220.0)
+
+	cm := int(math.Round(baseLevel + distFalloff))
 	if cm < 0 {
 		return 0
 	}
@@ -407,4 +415,52 @@ func (tm *TextureManager) PreloadMap(md *MapData) {
 			_, _ = tm.GetFlat(sec.CeilingPic)
 		}
 	}
+
+	// Preload sky texture
+	_ = tm.GetSkyTexture(md.Name)
 }
+
+// GetSkyTexture resolves and returns the sky wall texture appropriate for the given map name.
+func (tm *TextureManager) GetSkyTexture(mapName string) *Texture {
+	upper := strings.ToUpper(strings.TrimSpace(mapName))
+	skyName := "SKY1"
+
+	if strings.HasPrefix(upper, "MAP") && len(upper) >= 5 {
+		// Doom 2 episode sky mapping
+		var mapNum int
+		_, _ = fmt.Sscanf(upper[3:], "%d", &mapNum)
+		if mapNum >= 1 && mapNum <= 11 {
+			skyName = "SKY1"
+		} else if mapNum >= 12 && mapNum <= 20 {
+			skyName = "SKY2"
+		} else if mapNum >= 21 {
+			skyName = "SKY3"
+		}
+	} else if len(upper) == 4 && upper[0] == 'E' && upper[2] == 'M' {
+		// Doom 1 episode sky mapping: E1->SKY1, E2->SKY2, E3->SKY3, E4->SKY4
+		switch upper[1] {
+		case '1':
+			skyName = "SKY1"
+		case '2':
+			skyName = "SKY2"
+		case '3':
+			skyName = "SKY3"
+		case '4':
+			skyName = "SKY4"
+		default:
+			skyName = "SKY1"
+		}
+	}
+
+	if tex, err := tm.GetTexture(skyName); err == nil && tex != nil {
+		return tex
+	}
+	// Fallback to standard sky names
+	for _, fallback := range []string{"SKY1", "SKY2", "SKY3", "SKY4", "RSKY1"} {
+		if tex, err := tm.GetTexture(fallback); err == nil && tex != nil {
+			return tex
+		}
+	}
+	return nil
+}
+
