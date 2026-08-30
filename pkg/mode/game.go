@@ -18,6 +18,7 @@ const (
 // GameMode represents the composite game application mode composed of a UI/rendering layer stack.
 type GameMode struct {
 	mapName string
+	wadFile *wad.WAD
 	buffer  *ebiten.Image
 	bgColor color.RGBA
 
@@ -38,6 +39,7 @@ type GameMode struct {
 func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 	var titleImg *ebiten.Image
 	var stbarImg *ebiten.Image
+	var mapData *wad.MapData
 
 	if w != nil {
 		if img, err := w.GetPatchImage("TITLEPIC"); err == nil {
@@ -49,13 +51,21 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 		if img, err := w.GetPatchImage("STBAR"); err == nil {
 			stbarImg = img
 		}
+
+		if mapName != "" {
+			if md, err := w.LoadMap(mapName); err == nil {
+				mapData = md
+			}
+		}
 	}
 
 	common := NewCommonLayer(onToggleConsole)
 	menu := NewGameMenuLayer()
-	controls := NewGameControlsLayer()
+	miniMap := NewMiniMapLayer(mapData)
+	controls := NewGameControlsLayer(func() {
+		miniMap.SetVisible(!miniMap.IsVisible())
+	})
 	hud := NewHUDLayer(stbarImg)
-	miniMap := NewMiniMapLayer()
 	levelView := NewLevelViewLayer()
 	intermission := NewIntermissionLayer(titleImg)
 
@@ -72,6 +82,7 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 
 	return &GameMode{
 		mapName:           mapName,
+		wadFile:           w,
 		buffer:            ebiten.NewImage(GameBufferWidth, GameBufferHeight),
 		bgColor:           color.RGBA{R: 0, G: 0, B: 0, A: 255},
 		layers:            layers,
@@ -90,9 +101,22 @@ func (g *GameMode) MapName() string {
 	return g.mapName
 }
 
-// SetMapName updates the active map name.
+// SetMapName updates the active map name and reloads map geometry and entities.
 func (g *GameMode) SetMapName(name string) {
 	g.mapName = name
+	if g.wadFile != nil && name != "" {
+		if md, err := g.wadFile.LoadMap(name); err == nil {
+			g.miniMapLayer.SetMapData(md)
+		}
+	}
+}
+
+// MapData returns the active map data from the mini map layer, or nil if none loaded.
+func (g *GameMode) MapData() *wad.MapData {
+	if g.miniMapLayer != nil {
+		return g.miniMapLayer.MapData()
+	}
+	return nil
 }
 
 // Layers returns the layer stack from top to bottom.

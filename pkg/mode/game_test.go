@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
+
+	"github.com/qbradq/redoomed/pkg/wad"
 )
 
 func TestGameModeLayerStackOrdering(t *testing.T) {
@@ -92,21 +94,20 @@ func TestGameModeOcclusion(t *testing.T) {
 }
 
 type testCustomLayer struct {
-	name            string
-	visible         bool
-	preventsLower   bool
-	updateConsumed  bool
-	updateCalled    bool
-	drawCalled      bool
-	drawnToBuffer   bool
+	name           string
+	visible        bool
+	preventsLower  bool
+	updateConsumed bool
+	updateCalled   bool
+	drawCalled     bool
 }
 
-func (l *testCustomLayer) Name() string                     { return l.name }
-func (l *testCustomLayer) IsVisible() bool                 { return l.visible }
-func (l *testCustomLayer) SetVisible(v bool)               { l.visible = v }
-func (l *testCustomLayer) PreventsLowerDrawing() bool      { return l.preventsLower }
-func (l *testCustomLayer) Update() (bool, error)           { l.updateCalled = true; return l.updateConsumed, nil }
-func (l *testCustomLayer) Draw(screen *ebiten.Image)       { l.drawCalled = true }
+func (l *testCustomLayer) Name() string               { return l.name }
+func (l *testCustomLayer) IsVisible() bool           { return l.visible }
+func (l *testCustomLayer) SetVisible(v bool)         { l.visible = v }
+func (l *testCustomLayer) PreventsLowerDrawing() bool { return l.preventsLower }
+func (l *testCustomLayer) Update() (bool, error)     { l.updateCalled = true; return l.updateConsumed, nil }
+func (l *testCustomLayer) Draw(screen *ebiten.Image) { l.drawCalled = true }
 
 func TestGameModeInputPropagation(t *testing.T) {
 	gm := &GameMode{
@@ -185,3 +186,103 @@ func TestGameModeDrawWithTextures(t *testing.T) {
 	screen := ebiten.NewImage(1280, 800)
 	gm.Draw(screen)
 }
+
+func TestMiniMapDrawingAndFlags(t *testing.T) {
+	mapData := &wad.MapData{
+		Name: "TESTMAP",
+		Vertexes: []wad.Vertex{
+			{X: 0, Y: 0},
+			{X: 100, Y: 0},
+			{X: 100, Y: 100},
+			{X: 0, Y: 100},
+		},
+		Linedefs: []wad.Linedef{
+			{V1: 0, V2: 1, Flags: wad.LinedefBlocking},               // 1-sided wall (Red)
+			{V1: 1, V2: 2, Flags: wad.LinedefTwoSided},               // 2-sided line (Brown)
+			{V1: 2, V2: 3, Flags: wad.LinedefSecret},                 // Secret line (Red)
+			{V1: 3, V2: 0, Flags: wad.LinedefDontDraw},               // Don't draw (Skipped)
+		},
+		Things: []wad.Thing{
+			{X: 50, Y: 50, Angle: 90, Type: wad.ThingPlayer1Start},
+		},
+	}
+
+	miniMap := NewMiniMapLayer(mapData)
+	if !miniMap.HasPlayer() {
+		t.Fatal("expected player to be detected from ThingPlayer1Start")
+	}
+
+	miniMap.SetVisible(true)
+	screen := ebiten.NewImage(320, 200)
+	miniMap.Draw(screen)
+
+	// Test dynamic player position update
+	miniMap.SetPlayer(75, 25, 180)
+	if miniMap.playerX != 75 || miniMap.playerY != 25 || miniMap.playerAngle != 180 {
+		t.Errorf("player position mismatch: (%f, %f, %f)", miniMap.playerX, miniMap.playerY, miniMap.playerAngle)
+	}
+
+	miniMap.Draw(screen)
+}
+
+func TestGameControlsTabToggle(t *testing.T) {
+	toggled := false
+	controls := NewGameControlsLayer(func() {
+		toggled = true
+	})
+
+	if controls.Name() != "Game Controls" {
+		t.Errorf("expected name 'Game Controls', got %q", controls.Name())
+	}
+	if !controls.IsVisible() {
+		t.Error("expected controls to be visible")
+	}
+	if controls.onToggleMiniMap == nil {
+		t.Error("expected onToggleMiniMap to be non-nil")
+	}
+
+	// Trigger callback directly
+	controls.onToggleMiniMap()
+	if !toggled {
+		t.Error("expected toggled to be true after callback invocation")
+	}
+}
+
+func TestMiniMapZoomControls(t *testing.T) {
+	miniMap := NewMiniMapLayer(nil)
+
+	if miniMap.Zoom() != 1.0 {
+		t.Errorf("expected initial zoom 1.0, got %f", miniMap.Zoom())
+	}
+
+	// Test ZoomIn
+	miniMap.ZoomIn(2.0)
+	if miniMap.Zoom() != 2.0 {
+		t.Errorf("expected zoom 2.0, got %f", miniMap.Zoom())
+	}
+
+	// Test ZoomOut
+	miniMap.ZoomOut(2.0)
+	if miniMap.Zoom() != 1.0 {
+		t.Errorf("expected zoom 1.0, got %f", miniMap.Zoom())
+	}
+
+	// Test SetZoom bounds clamping
+	miniMap.SetZoom(100.0)
+	if miniMap.Zoom() != maxMiniMapZoom {
+		t.Errorf("expected zoom clamped to max %f, got %f", maxMiniMapZoom, miniMap.Zoom())
+	}
+
+	miniMap.SetZoom(0.01)
+	if miniMap.Zoom() != minMiniMapZoom {
+		t.Errorf("expected zoom clamped to min %f, got %f", minMiniMapZoom, miniMap.Zoom())
+	}
+
+	// Test Update when not visible (no-op)
+	miniMap.SetVisible(false)
+	consumed, err := miniMap.Update()
+	if err != nil || consumed {
+		t.Errorf("expected invisible layer Update to return false, nil; got %v, %v", consumed, err)
+	}
+}
+
