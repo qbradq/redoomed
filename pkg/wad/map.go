@@ -47,6 +47,74 @@ type Linedef struct {
 	LeftSide  uint16 // Left / back sidedef index (0xFFFF if none)
 }
 
+// Sidedef represents wall texture bindings from the SIDEDEFS lump.
+type Sidedef struct {
+	XOffset       int16
+	YOffset       int16
+	UpperTexture  string
+	LowerTexture  string
+	MiddleTexture string
+	Sector        uint16
+}
+
+type rawSidedef struct {
+	XOffset       int16
+	YOffset       int16
+	UpperTexture  [8]byte
+	LowerTexture  [8]byte
+	MiddleTexture [8]byte
+	Sector        uint16
+}
+
+// Sector represents a 2D floor/ceiling region from the SECTORS lump.
+type Sector struct {
+	FloorHeight   int16
+	CeilingHeight int16
+	FloorPic      string
+	CeilingPic    string
+	LightLevel    int16
+	Special       int16
+	Tag           int16
+}
+
+type rawSector struct {
+	FloorHeight   int16
+	CeilingHeight int16
+	FloorPic      [8]byte
+	CeilingPic    [8]byte
+	LightLevel    int16
+	Special       int16
+	Tag           int16
+}
+
+// Seg represents a line segment within a subsector from the SEGS lump.
+type Seg struct {
+	V1        uint16 // Start vertex index
+	V2        uint16 // End vertex index
+	Angle     int16  // Angle in BAM (Binary Angle Measurement)
+	Linedef   uint16 // Linedef index
+	Direction uint16 // 0: same as linedef (RightSide), 1: opposite (LeftSide)
+	Offset    int16  // Distance along linedef to start of seg
+}
+
+// Subsector represents a convex sub-polygon in the BSP tree from the SSECTORS lump.
+type Subsector struct {
+	NumSegs  uint16
+	FirstSeg uint16
+}
+
+// Node represents a partition node in the BSP tree from the NODES lump.
+type Node struct {
+	PartitionX       int16
+	PartitionY       int16
+	ChangeX          int16
+	ChangeY          int16
+	RightBoundingBox [4]int16 // Top, Bottom, Left, Right (maxY, minY, minX, maxX)
+	LeftBoundingBox  [4]int16 // Top, Bottom, Left, Right (maxY, minY, minX, maxX)
+	RightChild       uint16   // Subsector index if (RightChild & 0x8000 != 0); else Node index
+	LeftChild        uint16   // Subsector index if (LeftChild & 0x8000 != 0); else Node index
+}
+
 // Thing represents an entity placement from the THINGS lump.
 type Thing struct {
 	X     int16
@@ -56,12 +124,18 @@ type Thing struct {
 	Flags int16 // Spawn / skill flags
 }
 
-// MapData contains all parsed geometry and entity lumps for a Doom map.
+// MapData contains all parsed geometry, BSP, entity lumps, and textures for a Doom map.
 type MapData struct {
-	Name     string
-	Vertexes []Vertex
-	Linedefs []Linedef
-	Things   []Thing
+	Name       string
+	Vertexes   []Vertex
+	Linedefs   []Linedef
+	Sidedefs   []Sidedef
+	Sectors    []Sector
+	Segs       []Seg
+	Subsectors []Subsector
+	Nodes      []Node
+	Things     []Thing
+	Textures   *TextureManager
 }
 
 // ParseVertexes parses raw bytes from a VERTEXES lump (4 bytes per vertex: int16 X, int16 Y).
@@ -106,6 +180,128 @@ func ParseLinedefs(data []byte) ([]Linedef, error) {
 	return res, nil
 }
 
+// ParseSidedefs parses raw bytes from a SIDEDEFS lump (30 bytes per sidedef).
+func ParseSidedefs(data []byte) ([]Sidedef, error) {
+	if len(data)%30 != 0 {
+		return nil, errors.New("invalid SIDEDEFS lump size: must be a multiple of 30 bytes")
+	}
+
+	num := len(data) / 30
+	res := make([]Sidedef, num)
+	reader := bytes.NewReader(data)
+
+	for i := 0; i < num; i++ {
+		var raw rawSidedef
+		if err := binary.Read(reader, binary.LittleEndian, &raw); err != nil {
+			return nil, fmt.Errorf("failed to read sidedef %d: %w", i, err)
+		}
+
+		res[i] = Sidedef{
+			XOffset:       raw.XOffset,
+			YOffset:       raw.YOffset,
+			UpperTexture:  strings.ToUpper(string(bytes.TrimRight(raw.UpperTexture[:], "\x00"))),
+			LowerTexture:  strings.ToUpper(string(bytes.TrimRight(raw.LowerTexture[:], "\x00"))),
+			MiddleTexture: strings.ToUpper(string(bytes.TrimRight(raw.MiddleTexture[:], "\x00"))),
+			Sector:        raw.Sector,
+		}
+	}
+
+	return res, nil
+}
+
+// ParseSectors parses raw bytes from a SECTORS lump (26 bytes per sector).
+func ParseSectors(data []byte) ([]Sector, error) {
+	if len(data)%26 != 0 {
+		return nil, errors.New("invalid SECTORS lump size: must be a multiple of 26 bytes")
+	}
+
+	num := len(data) / 26
+	res := make([]Sector, num)
+	reader := bytes.NewReader(data)
+
+	for i := 0; i < num; i++ {
+		var raw rawSector
+		if err := binary.Read(reader, binary.LittleEndian, &raw); err != nil {
+			return nil, fmt.Errorf("failed to read sector %d: %w", i, err)
+		}
+
+		res[i] = Sector{
+			FloorHeight:   raw.FloorHeight,
+			CeilingHeight: raw.CeilingHeight,
+			FloorPic:      strings.ToUpper(string(bytes.TrimRight(raw.FloorPic[:], "\x00"))),
+			CeilingPic:    strings.ToUpper(string(bytes.TrimRight(raw.CeilingPic[:], "\x00"))),
+			LightLevel:    raw.LightLevel,
+			Special:       raw.Special,
+			Tag:           raw.Tag,
+		}
+	}
+
+	return res, nil
+}
+
+// ParseSegs parses raw bytes from a SEGS lump (12 bytes per seg).
+func ParseSegs(data []byte) ([]Seg, error) {
+	if len(data)%12 != 0 {
+		return nil, errors.New("invalid SEGS lump size: must be a multiple of 12 bytes")
+	}
+
+	num := len(data) / 12
+	res := make([]Seg, num)
+	reader := bytes.NewReader(data)
+
+	for i := 0; i < num; i++ {
+		var s Seg
+		if err := binary.Read(reader, binary.LittleEndian, &s); err != nil {
+			return nil, fmt.Errorf("failed to read seg %d: %w", i, err)
+		}
+		res[i] = s
+	}
+
+	return res, nil
+}
+
+// ParseSubsectors parses raw bytes from a SSECTORS lump (4 bytes per subsector).
+func ParseSubsectors(data []byte) ([]Subsector, error) {
+	if len(data)%4 != 0 {
+		return nil, errors.New("invalid SSECTORS lump size: must be a multiple of 4 bytes")
+	}
+
+	num := len(data) / 4
+	res := make([]Subsector, num)
+	reader := bytes.NewReader(data)
+
+	for i := 0; i < num; i++ {
+		var ss Subsector
+		if err := binary.Read(reader, binary.LittleEndian, &ss); err != nil {
+			return nil, fmt.Errorf("failed to read subsector %d: %w", i, err)
+		}
+		res[i] = ss
+	}
+
+	return res, nil
+}
+
+// ParseNodes parses raw bytes from a NODES lump (28 bytes per node).
+func ParseNodes(data []byte) ([]Node, error) {
+	if len(data)%28 != 0 {
+		return nil, errors.New("invalid NODES lump size: must be a multiple of 28 bytes")
+	}
+
+	num := len(data) / 28
+	res := make([]Node, num)
+	reader := bytes.NewReader(data)
+
+	for i := 0; i < num; i++ {
+		var n Node
+		if err := binary.Read(reader, binary.LittleEndian, &n); err != nil {
+			return nil, fmt.Errorf("failed to read node %d: %w", i, err)
+		}
+		res[i] = n
+	}
+
+	return res, nil
+}
+
 // ParseThings parses raw bytes from a THINGS lump (10 bytes per thing).
 func ParseThings(data []byte) ([]Thing, error) {
 	if len(data)%10 != 0 {
@@ -127,7 +323,7 @@ func ParseThings(data []byte) ([]Thing, error) {
 	return res, nil
 }
 
-// GetMapLump finds and retrieves a map-specific lump (e.g. THINGS, LINEDEFS, VERTEXES)
+// GetMapLump finds and retrieves a map-specific lump (e.g. THINGS, LINEDEFS, VERTEXES, SIDEDEFS, SECTORS, SEGS, SSECTORS, NODES)
 // associated with the given map marker (e.g. "MAP01" or "E1M1").
 func (w *WAD) GetMapLump(mapName, lumpName string) ([]byte, error) {
 	mapIdx := w.GetLumpIndex(mapName)
@@ -169,7 +365,7 @@ func isMapHeader(name string) bool {
 	return false
 }
 
-// LoadMap parses all primary geometry and entity lumps (THINGS, LINEDEFS, VERTEXES) for the given map.
+// LoadMap parses all geometry, BSP, sidedefs, sectors, entity lumps, and textures for the given map.
 func (w *WAD) LoadMap(mapName string) (*MapData, error) {
 	upperMap := strings.ToUpper(mapName)
 
@@ -191,6 +387,51 @@ func (w *WAD) LoadMap(mapName string) (*MapData, error) {
 		return nil, fmt.Errorf("failed to parse LINEDEFS for %s: %w", upperMap, err)
 	}
 
+	sidedefData, err := w.GetMapLump(upperMap, "SIDEDEFS")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load SIDEDEFS for %s: %w", upperMap, err)
+	}
+	sidedefs, err := ParseSidedefs(sidedefData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse SIDEDEFS for %s: %w", upperMap, err)
+	}
+
+	sectorData, err := w.GetMapLump(upperMap, "SECTORS")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load SECTORS for %s: %w", upperMap, err)
+	}
+	sectors, err := ParseSectors(sectorData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse SECTORS for %s: %w", upperMap, err)
+	}
+
+	segData, err := w.GetMapLump(upperMap, "SEGS")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load SEGS for %s: %w", upperMap, err)
+	}
+	segs, err := ParseSegs(segData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse SEGS for %s: %w", upperMap, err)
+	}
+
+	ssectorData, err := w.GetMapLump(upperMap, "SSECTORS")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load SSECTORS for %s: %w", upperMap, err)
+	}
+	subsectors, err := ParseSubsectors(ssectorData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse SSECTORS for %s: %w", upperMap, err)
+	}
+
+	nodeData, err := w.GetMapLump(upperMap, "NODES")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load NODES for %s: %w", upperMap, err)
+	}
+	nodes, err := ParseNodes(nodeData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse NODES for %s: %w", upperMap, err)
+	}
+
 	thingData, err := w.GetMapLump(upperMap, "THINGS")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load THINGS for %s: %w", upperMap, err)
@@ -200,11 +441,35 @@ func (w *WAD) LoadMap(mapName string) (*MapData, error) {
 		return nil, fmt.Errorf("failed to parse THINGS for %s: %w", upperMap, err)
 	}
 
+	// Initialize texture manager and preload all textures & flats referenced by the map
+	texMgr, err := NewTextureManager(w)
+	if err == nil {
+		mapData := &MapData{
+			Name:       upperMap,
+			Vertexes:   vertexes,
+			Linedefs:   linedefs,
+			Sidedefs:   sidedefs,
+			Sectors:    sectors,
+			Segs:       segs,
+			Subsectors: subsectors,
+			Nodes:      nodes,
+			Things:     things,
+			Textures:   texMgr,
+		}
+		texMgr.PreloadMap(mapData)
+		return mapData, nil
+	}
+
 	return &MapData{
-		Name:     upperMap,
-		Vertexes: vertexes,
-		Linedefs: linedefs,
-		Things:   things,
+		Name:       upperMap,
+		Vertexes:   vertexes,
+		Linedefs:   linedefs,
+		Sidedefs:   sidedefs,
+		Sectors:    sectors,
+		Segs:       segs,
+		Subsectors: subsectors,
+		Nodes:      nodes,
+		Things:     things,
 	}, nil
 }
 
@@ -245,4 +510,78 @@ func (m *MapData) Player1Start() (Thing, bool) {
 		}
 	}
 	return Thing{}, false
+}
+
+// FindSubsector finds the subsector index containing 2D point (x, y) by traversing the BSP tree.
+func (m *MapData) FindSubsector(x, y float64) int {
+	if len(m.Nodes) == 0 {
+		return 0
+	}
+
+	nodeIdx := len(m.Nodes) - 1
+	for {
+		if nodeIdx < 0 || nodeIdx >= len(m.Nodes) {
+			return 0
+		}
+		node := &m.Nodes[nodeIdx]
+
+		// Doom BSP partition side test:
+		// side = 0 (right/front) if (y - py) * dx < (x - px) * dy
+		dx := x - float64(node.PartitionX)
+		dy := y - float64(node.PartitionY)
+		left := float64(node.ChangeY) * dx
+		right := dy * float64(node.ChangeX)
+
+		var child uint16
+		if right < left {
+			child = node.RightChild
+		} else {
+			child = node.LeftChild
+		}
+
+		if child&0x8000 != 0 {
+			// Subsector leaf node
+			return int(child & 0x7FFF)
+		}
+		nodeIdx = int(child)
+	}
+}
+
+// SectorAt returns the sector containing the point (x, y) if found.
+func (m *MapData) SectorAt(x, y float64) (*Sector, bool) {
+	if len(m.Subsectors) == 0 || len(m.Segs) == 0 {
+		return nil, false
+	}
+	ssIdx := m.FindSubsector(x, y)
+	if ssIdx < 0 || ssIdx >= len(m.Subsectors) {
+		return nil, false
+	}
+	ss := &m.Subsectors[ssIdx]
+	if ss.NumSegs == 0 {
+		return nil, false
+	}
+	firstSeg := int(ss.FirstSeg)
+	if firstSeg < 0 || firstSeg >= len(m.Segs) {
+		return nil, false
+	}
+	seg := &m.Segs[firstSeg]
+	if int(seg.Linedef) >= len(m.Linedefs) {
+		return nil, false
+	}
+	ld := &m.Linedefs[seg.Linedef]
+
+	var sidedefIdx uint16
+	if seg.Direction == 0 {
+		sidedefIdx = ld.RightSide
+	} else {
+		sidedefIdx = ld.LeftSide
+	}
+	if sidedefIdx == 0xFFFF || int(sidedefIdx) >= len(m.Sidedefs) {
+		return nil, false
+	}
+	secIdx := m.Sidedefs[sidedefIdx].Sector
+	if int(secIdx) >= len(m.Sectors) {
+		return nil, false
+	}
+	return &m.Sectors[secIdx], true
 }

@@ -2,6 +2,7 @@ package mode
 
 import (
 	"image/color"
+	"os"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -62,14 +63,14 @@ func TestGameModeLayerStackOrdering(t *testing.T) {
 func TestGameModeOcclusion(t *testing.T) {
 	gm := NewGameMode("MAP01", nil, nil)
 
-	// In default state:
+	// In default state without loaded map:
 	// Mini map and Level view are invisible (false).
 	// Intermission and HUD are visible (true).
 	if gm.MiniMapLayer().IsVisible() {
 		t.Error("expected MiniMapLayer to be invisible by default")
 	}
 	if gm.LevelViewLayer().IsVisible() {
-		t.Error("expected LevelViewLayer to be invisible by default")
+		t.Error("expected LevelViewLayer to be invisible by default without WAD")
 	}
 	if !gm.IntermissionLayer().IsVisible() {
 		t.Error("expected IntermissionLayer to be visible by default")
@@ -187,6 +188,54 @@ func TestGameModeDrawWithTextures(t *testing.T) {
 	gm.Draw(screen)
 }
 
+func TestLevelViewLayerAndMovement(t *testing.T) {
+	wadPath := "../../freedoom2.wad"
+	if _, err := os.Stat(wadPath); os.IsNotExist(err) {
+		wadPath = "freedoom2.wad"
+		if _, err := os.Stat(wadPath); os.IsNotExist(err) {
+			t.Skip("freedoom2.wad not found in test path, skipping")
+		}
+	}
+
+	w, err := wad.Open(wadPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer w.Close()
+
+	gm := NewGameMode("MAP01", w, nil)
+
+	// Verify LevelViewLayer was set visible by loading map
+	if !gm.LevelViewLayer().IsVisible() {
+		t.Error("expected LevelViewLayer to be visible after map load")
+	}
+	if gm.MiniMapLayer().IsVisible() {
+		t.Error("expected MiniMapLayer to be hidden by default after map load")
+	}
+	if gm.IntermissionLayer().IsVisible() {
+		t.Error("expected IntermissionLayer to be hidden after map load")
+	}
+
+	cam := gm.LevelViewLayer().Camera()
+	if cam == nil {
+		t.Fatal("expected non-nil Camera in LevelViewLayer")
+	}
+	origX, origY, origAngle := cam.X, cam.Y, cam.Angle
+
+	// Move player
+	gm.LevelViewLayer().MovePlayer(10.0, 0.0, 15.0)
+	if cam.Angle != origAngle+15.0 {
+		t.Errorf("expected angle %f, got %f", origAngle+15.0, cam.Angle)
+	}
+	if cam.X == origX && cam.Y == origY {
+		t.Error("expected player position to change after MovePlayer")
+	}
+
+	// Render frame
+	screen := ebiten.NewImage(1280, 800)
+	gm.Draw(screen)
+}
+
 func TestMiniMapDrawingAndFlags(t *testing.T) {
 	mapData := &wad.MapData{
 		Name: "TESTMAP",
@@ -197,10 +246,10 @@ func TestMiniMapDrawingAndFlags(t *testing.T) {
 			{X: 0, Y: 100},
 		},
 		Linedefs: []wad.Linedef{
-			{V1: 0, V2: 1, Flags: wad.LinedefBlocking},               // 1-sided wall (Red)
-			{V1: 1, V2: 2, Flags: wad.LinedefTwoSided},               // 2-sided line (Brown)
-			{V1: 2, V2: 3, Flags: wad.LinedefSecret},                 // Secret line (Red)
-			{V1: 3, V2: 0, Flags: wad.LinedefDontDraw},               // Don't draw (Skipped)
+			{V1: 0, V2: 1, Flags: wad.LinedefBlocking}, // 1-sided wall (Red)
+			{V1: 1, V2: 2, Flags: wad.LinedefTwoSided}, // 2-sided line (Brown)
+			{V1: 2, V2: 3, Flags: wad.LinedefSecret},   // Secret line (Red)
+			{V1: 3, V2: 0, Flags: wad.LinedefDontDraw}, // Don't draw (Skipped)
 		},
 		Things: []wad.Thing{
 			{X: 50, Y: 50, Angle: 90, Type: wad.ThingPlayer1Start},
@@ -218,8 +267,9 @@ func TestMiniMapDrawingAndFlags(t *testing.T) {
 
 	// Test dynamic player position update
 	miniMap.SetPlayer(75, 25, 180)
-	if miniMap.playerX != 75 || miniMap.playerY != 25 || miniMap.playerAngle != 180 {
-		t.Errorf("player position mismatch: (%f, %f, %f)", miniMap.playerX, miniMap.playerY, miniMap.playerAngle)
+	x, y, angle := miniMap.PlayerPosition()
+	if x != 75 || y != 25 || angle != 180 {
+		t.Errorf("player position mismatch: (%f, %f, %f)", x, y, angle)
 	}
 
 	miniMap.Draw(screen)
@@ -285,4 +335,3 @@ func TestMiniMapZoomControls(t *testing.T) {
 		t.Errorf("expected invisible layer Update to return false, nil; got %v, %v", consumed, err)
 	}
 }
-

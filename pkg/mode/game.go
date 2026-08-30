@@ -62,12 +62,27 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 	common := NewCommonLayer(onToggleConsole)
 	menu := NewGameMenuLayer()
 	miniMap := NewMiniMapLayer(mapData)
+	levelView := NewLevelViewLayer()
+	hud := NewHUDLayer(stbarImg)
+	intermission := NewIntermissionLayer(titleImg)
+
+	if mapData != nil {
+		levelView.SetMapData(mapData)
+		levelView.SetVisible(true)
+		intermission.SetVisible(false)
+	}
+
 	controls := NewGameControlsLayer(func() {
 		miniMap.SetVisible(!miniMap.IsVisible())
 	})
-	hud := NewHUDLayer(stbarImg)
-	levelView := NewLevelViewLayer()
-	intermission := NewIntermissionLayer(titleImg)
+
+	controls.SetOnMovePlayer(func(forward, strafe, turn float64) {
+		levelView.MovePlayer(forward, strafe, turn)
+		cam := levelView.Camera()
+		if cam != nil {
+			miniMap.SetPlayer(cam.X, cam.Y, cam.Angle)
+		}
+	})
 
 	// Layer stack ordered from top to bottom
 	layers := []Layer{
@@ -101,18 +116,25 @@ func (g *GameMode) MapName() string {
 	return g.mapName
 }
 
-// SetMapName updates the active map name and reloads map geometry and entities.
+// SetMapName updates the active map name and reloads map geometry, BSP, and textures.
 func (g *GameMode) SetMapName(name string) {
 	g.mapName = name
 	if g.wadFile != nil && name != "" {
 		if md, err := g.wadFile.LoadMap(name); err == nil {
 			g.miniMapLayer.SetMapData(md)
+			g.levelViewLayer.SetMapData(md)
+			g.levelViewLayer.SetVisible(true)
+			g.miniMapLayer.SetVisible(false)
+			g.intermissionLayer.SetVisible(false)
 		}
 	}
 }
 
-// MapData returns the active map data from the mini map layer, or nil if none loaded.
+// MapData returns the active map data from the level view layer (or mini map layer), or nil if none loaded.
 func (g *GameMode) MapData() *wad.MapData {
+	if g.levelViewLayer != nil && g.levelViewLayer.MapData() != nil {
+		return g.levelViewLayer.MapData()
+	}
 	if g.miniMapLayer != nil {
 		return g.miniMapLayer.MapData()
 	}

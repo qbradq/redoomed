@@ -8,6 +8,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	"github.com/qbradq/redoomed/pkg/gfx"
+	"github.com/qbradq/redoomed/pkg/render"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
 
@@ -100,6 +101,7 @@ func (l *GameMenuLayer) PreventsLowerDrawing() bool { return false }
 type GameControlsLayer struct {
 	visible         bool
 	onToggleMiniMap func()
+	onMovePlayer    func(forward, strafe, turn float64)
 }
 
 // NewGameControlsLayer creates a new GameControlsLayer.
@@ -112,14 +114,72 @@ func NewGameControlsLayer(onToggleMiniMap func()) *GameControlsLayer {
 
 func (l *GameControlsLayer) Name() string { return "Game Controls" }
 
+// SetOnToggleMiniMap updates the mini map toggle callback.
+func (l *GameControlsLayer) SetOnToggleMiniMap(fn func()) {
+	l.onToggleMiniMap = fn
+}
+
+// SetOnMovePlayer updates the player movement callback.
+func (l *GameControlsLayer) SetOnMovePlayer(fn func(forward, strafe, turn float64)) {
+	l.onMovePlayer = fn
+}
+
 func (l *GameControlsLayer) Update() (bool, error) {
+	if !l.visible {
+		return false, nil
+	}
+
+	consumed := false
+
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
 		if l.onToggleMiniMap != nil {
 			l.onToggleMiniMap()
 		}
 		return true, nil
 	}
-	return false, nil
+
+	// Player movement inputs (WASD / Arrows)
+	moveSpeed := 3.0
+	turnSpeed := 2.5
+
+	if ebiten.IsKeyPressed(ebiten.KeyShift) ||
+		ebiten.IsKeyPressed(ebiten.KeyShiftLeft) ||
+		ebiten.IsKeyPressed(ebiten.KeyShiftRight) {
+		moveSpeed = 6.0
+		turnSpeed = 4.0
+	}
+
+	var forward, strafe, turn float64
+
+	if ebiten.IsKeyPressed(ebiten.KeyW) || ebiten.IsKeyPressed(ebiten.KeyUp) {
+		forward += moveSpeed
+	}
+	if ebiten.IsKeyPressed(ebiten.KeyS) || ebiten.IsKeyPressed(ebiten.KeyDown) {
+		forward -= moveSpeed
+	}
+
+	if ebiten.IsKeyPressed(ebiten.KeyA) || ebiten.IsKeyPressed(ebiten.KeyComma) {
+		strafe -= moveSpeed
+	}
+	if ebiten.IsKeyPressed(ebiten.KeyD) || ebiten.IsKeyPressed(ebiten.KeyPeriod) {
+		strafe += moveSpeed
+	}
+
+	if ebiten.IsKeyPressed(ebiten.KeyQ) || ebiten.IsKeyPressed(ebiten.KeyLeft) {
+		turn += turnSpeed
+	}
+	if ebiten.IsKeyPressed(ebiten.KeyE) || ebiten.IsKeyPressed(ebiten.KeyRight) {
+		turn -= turnSpeed
+	}
+
+	if forward != 0 || strafe != 0 || turn != 0 {
+		if l.onMovePlayer != nil {
+			l.onMovePlayer(forward, strafe, turn)
+		}
+		consumed = true
+	}
+
+	return consumed, nil
 }
 
 func (l *GameControlsLayer) Draw(screen *ebiten.Image) {}
@@ -129,11 +189,6 @@ func (l *GameControlsLayer) IsVisible() bool { return l.visible }
 func (l *GameControlsLayer) SetVisible(v bool) { l.visible = v }
 
 func (l *GameControlsLayer) PreventsLowerDrawing() bool { return false }
-
-// SetOnToggleMiniMap updates the mini map toggle callback.
-func (l *GameControlsLayer) SetOnToggleMiniMap(fn func()) {
-	l.onToggleMiniMap = fn
-}
 
 // HUDLayer renders the game's heads-up display (status bar).
 type HUDLayer struct {
@@ -327,6 +382,11 @@ func (l *MiniMapLayer) HasPlayer() bool {
 	return l.hasPlayer
 }
 
+// PlayerPosition returns the player's coordinates and angle on the mini map.
+func (l *MiniMapLayer) PlayerPosition() (x, y, angle float64) {
+	return l.playerX, l.playerY, l.playerAngle
+}
+
 // Draw renders the vector line map and the player directional arrow onto the 320x200 buffer.
 func (l *MiniMapLayer) Draw(screen *ebiten.Image) {
 	if !l.visible {
@@ -444,7 +504,7 @@ func (l *MiniMapLayer) Draw(screen *ebiten.Image) {
 		leftY := py - float32(dirY*(arrowLen*0.5)) + float32(perpY*arrowHalfW)
 
 		rightX := px - float32(dirX*(arrowLen*0.5)) - float32(perpX*arrowHalfW)
-		rightY := py - float32(dirY*(arrowLen*0.5)) - float32(perpY*arrowHalfW)
+		rightY := py - float32(dirY*(arrowLen*0.5)) - float32(perpX*arrowHalfW)
 
 		backX := px - float32(dirX*(arrowLen*0.2))
 		backY := py - float32(dirY*(arrowLen*0.2))
@@ -465,17 +525,100 @@ func (l *MiniMapLayer) PreventsLowerDrawing() bool { return true }
 
 // LevelViewLayer renders the 2.5D software-rendered level view.
 type LevelViewLayer struct {
-	visible bool
+	visible   bool
+	mapData   *wad.MapData
+	renderer  *render.Renderer
+	cam       render.Camera
+	hasPlayer bool
 }
 
 // NewLevelViewLayer creates a new LevelViewLayer (hidden by default, occludes lower layers when visible).
 func NewLevelViewLayer() *LevelViewLayer {
 	return &LevelViewLayer{
-		visible: false,
+		visible:  false,
+		renderer: render.NewRenderer(GameBufferWidth, 168, GameBufferHeight),
+		cam: render.Camera{
+			EyeHeight: render.DefaultPlayerEyeHeight,
+		},
 	}
 }
 
 func (l *LevelViewLayer) Name() string { return "Level view" }
+
+// SetMapData updates the active map data and initializes the camera from Player 1 start.
+func (l *LevelViewLayer) SetMapData(m *wad.MapData) {
+	l.mapData = m
+	if m != nil {
+		if p1, ok := m.Player1Start(); ok {
+			l.cam.X = float64(p1.X)
+			l.cam.Y = float64(p1.Y)
+			l.cam.Angle = float64(p1.Angle)
+			l.hasPlayer = true
+			if sec, ok := m.SectorAt(l.cam.X, l.cam.Y); ok && sec != nil {
+				l.cam.Z = float64(sec.FloorHeight) + l.cam.EyeHeight
+			}
+		} else {
+			l.hasPlayer = false
+		}
+	} else {
+		l.hasPlayer = false
+	}
+}
+
+// MapData returns the active map data.
+func (l *LevelViewLayer) MapData() *wad.MapData {
+	return l.mapData
+}
+
+// Camera returns a pointer to the level view camera.
+func (l *LevelViewLayer) Camera() *render.Camera {
+	return &l.cam
+}
+
+// SetCamera updates the camera position and angle.
+func (l *LevelViewLayer) SetCamera(x, y, z, angle float64) {
+	l.cam.X = x
+	l.cam.Y = y
+	l.cam.Z = z
+	l.cam.Angle = angle
+	l.hasPlayer = true
+}
+
+// MovePlayer moves and rotates the camera based on forward, strafe, and turn deltas.
+func (l *LevelViewLayer) MovePlayer(forward, strafe, turn float64) {
+	if !l.hasPlayer {
+		return
+	}
+
+	l.cam.Angle += turn
+	for l.cam.Angle < 0 {
+		l.cam.Angle += 360
+	}
+	for l.cam.Angle >= 360 {
+		l.cam.Angle -= 360
+	}
+
+	rad := l.cam.Angle * math.Pi / 180.0
+	cosA := math.Cos(rad)
+	sinA := math.Sin(rad)
+
+	// Forward movement (+cos, +sin)
+	dx := forward * cosA
+	dy := forward * sinA
+
+	// Strafe movement (+sin, -cos)
+	dx += strafe * sinA
+	dy += strafe * (-cosA)
+
+	l.cam.X += dx
+	l.cam.Y += dy
+
+	if l.mapData != nil {
+		if sec, ok := l.mapData.SectorAt(l.cam.X, l.cam.Y); ok && sec != nil {
+			l.cam.Z = float64(sec.FloorHeight) + l.cam.EyeHeight
+		}
+	}
+}
 
 func (l *LevelViewLayer) Update() (bool, error) {
 	if !l.visible {
@@ -484,7 +627,13 @@ func (l *LevelViewLayer) Update() (bool, error) {
 	return false, nil
 }
 
-func (l *LevelViewLayer) Draw(screen *ebiten.Image) {}
+// Draw renders the 2.5D view onto the 320x200 screen buffer.
+func (l *LevelViewLayer) Draw(screen *ebiten.Image) {
+	if !l.visible || l.mapData == nil {
+		return
+	}
+	l.renderer.Render(screen, l.mapData, &l.cam)
+}
 
 func (l *LevelViewLayer) IsVisible() bool { return l.visible }
 

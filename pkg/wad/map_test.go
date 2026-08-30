@@ -67,6 +67,141 @@ func TestParseLinedefs(t *testing.T) {
 	}
 }
 
+func TestParseSidedefs(t *testing.T) {
+	buf := new(bytes.Buffer)
+	var raw rawSidedef
+	raw.XOffset = 10
+	raw.YOffset = 20
+	copy(raw.UpperTexture[:], "STARTAN2")
+	copy(raw.LowerTexture[:], "DOOR3")
+	copy(raw.MiddleTexture[:], "-")
+	raw.Sector = 5
+	_ = binary.Write(buf, binary.LittleEndian, raw)
+
+	sidedefs, err := ParseSidedefs(buf.Bytes())
+	if err != nil {
+		t.Fatalf("ParseSidedefs failed: %v", err)
+	}
+	if len(sidedefs) != 1 {
+		t.Fatalf("expected 1 sidedef, got %d", len(sidedefs))
+	}
+	s := sidedefs[0]
+	if s.XOffset != 10 || s.YOffset != 20 || s.UpperTexture != "STARTAN2" || s.LowerTexture != "DOOR3" || s.MiddleTexture != "-" || s.Sector != 5 {
+		t.Errorf("sidedef mismatch: %+v", s)
+	}
+
+	_, err = ParseSidedefs([]byte{1, 2, 3})
+	if err == nil {
+		t.Error("expected error on invalid sidedef data length")
+	}
+}
+
+func TestParseSectors(t *testing.T) {
+	buf := new(bytes.Buffer)
+	var raw rawSector
+	raw.FloorHeight = 0
+	raw.CeilingHeight = 128
+	copy(raw.FloorPic[:], "FLOOR4_8")
+	copy(raw.CeilingPic[:], "CEIL1_1")
+	raw.LightLevel = 160
+	raw.Special = 0
+	raw.Tag = 1
+	_ = binary.Write(buf, binary.LittleEndian, raw)
+
+	sectors, err := ParseSectors(buf.Bytes())
+	if err != nil {
+		t.Fatalf("ParseSectors failed: %v", err)
+	}
+	if len(sectors) != 1 {
+		t.Fatalf("expected 1 sector, got %d", len(sectors))
+	}
+	sec := sectors[0]
+	if sec.FloorHeight != 0 || sec.CeilingHeight != 128 || sec.FloorPic != "FLOOR4_8" || sec.CeilingPic != "CEIL1_1" || sec.LightLevel != 160 || sec.Tag != 1 {
+		t.Errorf("sector mismatch: %+v", sec)
+	}
+
+	_, err = ParseSectors([]byte{1, 2, 3})
+	if err == nil {
+		t.Error("expected error on invalid sector data length")
+	}
+}
+
+func TestParseSegs(t *testing.T) {
+	buf := new(bytes.Buffer)
+	seg := Seg{
+		V1:        1,
+		V2:        2,
+		Angle:     -16384,
+		Linedef:   10,
+		Direction: 0,
+		Offset:    0,
+	}
+	_ = binary.Write(buf, binary.LittleEndian, seg)
+
+	segs, err := ParseSegs(buf.Bytes())
+	if err != nil {
+		t.Fatalf("ParseSegs failed: %v", err)
+	}
+	if len(segs) != 1 || segs[0].V1 != 1 || segs[0].V2 != 2 || segs[0].Linedef != 10 {
+		t.Errorf("seg mismatch: %+v", segs)
+	}
+
+	_, err = ParseSegs([]byte{1, 2, 3})
+	if err == nil {
+		t.Error("expected error on invalid seg data length")
+	}
+}
+
+func TestParseSubsectors(t *testing.T) {
+	buf := new(bytes.Buffer)
+	ss := Subsector{
+		NumSegs:  4,
+		FirstSeg: 12,
+	}
+	_ = binary.Write(buf, binary.LittleEndian, ss)
+
+	subsectors, err := ParseSubsectors(buf.Bytes())
+	if err != nil {
+		t.Fatalf("ParseSubsectors failed: %v", err)
+	}
+	if len(subsectors) != 1 || subsectors[0].NumSegs != 4 || subsectors[0].FirstSeg != 12 {
+		t.Errorf("subsector mismatch: %+v", subsectors)
+	}
+
+	_, err = ParseSubsectors([]byte{1, 2})
+	if err == nil {
+		t.Error("expected error on invalid subsector data length")
+	}
+}
+
+func TestParseNodes(t *testing.T) {
+	buf := new(bytes.Buffer)
+	node := Node{
+		PartitionX:       100,
+		PartitionY:       200,
+		ChangeX:          0,
+		ChangeY:          50,
+		RightBoundingBox: [4]int16{250, 200, 100, 150},
+		LeftBoundingBox:  [4]int16{250, 200, 50, 100},
+		RightChild:       0x8001, // Subsector 1
+		LeftChild:        0x8002, // Subsector 2
+	}
+	_ = binary.Write(buf, binary.LittleEndian, node)
+
+	nodes, err := ParseNodes(buf.Bytes())
+	if err != nil {
+		t.Fatalf("ParseNodes failed: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].PartitionX != 100 || nodes[0].RightChild != 0x8001 {
+		t.Errorf("node mismatch: %+v", nodes)
+	}
+
+	_, err = ParseNodes([]byte{1, 2, 3})
+	if err == nil {
+		t.Error("expected error on invalid node data length")
+	}
+}
+
 func TestParseThings(t *testing.T) {
 	buf := new(bytes.Buffer)
 	th := Thing{
@@ -125,8 +260,26 @@ func TestLoadMapFromWAD(t *testing.T) {
 	if len(mapData.Linedefs) == 0 {
 		t.Error("expected non-empty linedefs for MAP01")
 	}
+	if len(mapData.Sidedefs) == 0 {
+		t.Error("expected non-empty sidedefs for MAP01")
+	}
+	if len(mapData.Sectors) == 0 {
+		t.Error("expected non-empty sectors for MAP01")
+	}
+	if len(mapData.Segs) == 0 {
+		t.Error("expected non-empty segs for MAP01")
+	}
+	if len(mapData.Subsectors) == 0 {
+		t.Error("expected non-empty subsectors for MAP01")
+	}
+	if len(mapData.Nodes) == 0 {
+		t.Error("expected non-empty nodes for MAP01")
+	}
 	if len(mapData.Things) == 0 {
 		t.Error("expected non-empty things for MAP01")
+	}
+	if mapData.Textures == nil {
+		t.Error("expected non-nil TextureManager for MAP01")
 	}
 
 	p1, ok := mapData.Player1Start()
@@ -135,6 +288,12 @@ func TestLoadMapFromWAD(t *testing.T) {
 	}
 	if p1.Type != ThingPlayer1Start {
 		t.Errorf("expected p1 type 1, got %d", p1.Type)
+	}
+
+	// Verify finding player's sector via BSP
+	sec, ok := mapData.SectorAt(float64(p1.X), float64(p1.Y))
+	if !ok || sec == nil {
+		t.Errorf("failed to find sector at player start (%d, %d)", p1.X, p1.Y)
 	}
 
 	minX, maxX, minY, maxY := mapData.Bounds()
