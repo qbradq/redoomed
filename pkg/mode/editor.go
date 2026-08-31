@@ -148,6 +148,12 @@ type EditorMode struct {
 	zoomLevel int
 	editMode  EditMode
 
+	// Hovered target indices (-1 if none)
+	hoveredVertex  int
+	hoveredLinedef int
+	hoveredSector  int
+	hoveredThing   int
+
 	// Camera world position (map units) centered in the editing window
 	camX float64
 	camY float64
@@ -172,15 +178,19 @@ func NewEditorMode(f *font.ConsoleFont, w *wad.WAD) *EditorMode {
 	icons, _ := loadEditorIcons()
 
 	ed := &EditorMode{
-		buffer:     ebiten.NewImage(EditorBufferWidth, EditorBufferHeight),
-		wadFile:    w,
-		font:       f,
-		iconsImage: icons,
-		gridSize:   DefaultGridSize,
-		zoomLevel:  DefaultZoomLevel,
-		editMode:   EditModeVertex,
-		camX:       0,
-		camY:       0,
+		buffer:         ebiten.NewImage(EditorBufferWidth, EditorBufferHeight),
+		wadFile:        w,
+		font:           f,
+		iconsImage:     icons,
+		gridSize:       DefaultGridSize,
+		zoomLevel:      DefaultZoomLevel,
+		editMode:       EditModeVertex,
+		hoveredVertex:  -1,
+		hoveredLinedef: -1,
+		hoveredSector:  -1,
+		hoveredThing:   -1,
+		camX:           0,
+		camY:           0,
 	}
 
 	ed.initButtons()
@@ -343,6 +353,140 @@ func (e *EditorMode) Button(index int) IconButton {
 // Buttons returns all 15 icon button slot definitions.
 func (e *EditorMode) Buttons() [NumIconButtons]IconButton {
 	return e.buttons
+}
+
+// HoveredVertex returns the index of the vertex currently hovered in vertex mode (-1 if none).
+func (e *EditorMode) HoveredVertex() int {
+	return e.hoveredVertex
+}
+
+// HoveredLinedef returns the index of the linedef currently hovered in line mode (-1 if none).
+func (e *EditorMode) HoveredLinedef() int {
+	return e.hoveredLinedef
+}
+
+// HoveredSector returns the index of the sector currently hovered in sector mode (-1 if none).
+func (e *EditorMode) HoveredSector() int {
+	return e.hoveredSector
+}
+
+// HoveredThing returns the index of the thing currently hovered in thing mode (-1 if none).
+func (e *EditorMode) HoveredThing() int {
+	return e.hoveredThing
+}
+
+// GetThingRadius returns the collision/bounding radius of a Doom thing in map units.
+func GetThingRadius(thingType int16) float64 {
+	if def, ok := wad.LookupItemDef(thingType); ok && def.Radius > 0 {
+		return def.Radius
+	}
+	switch thingType {
+	case 1, 2, 3, 4, 11: // Player starts / deathmatch start
+		return 16.0
+	case 3004, 9, 65, 3001, 3006: // Zombieman, Shotgun guy, Chaingunner, Imp, Lost Soul
+		return 20.0
+	case 3002, 58: // Demon, Specter
+		return 30.0
+	case 3005, 3003, 69: // Cacodemon, Baron of Hell, Hell Knight
+		return 31.0
+	case 16, 7: // Cyberdemon, Spider Mastermind
+		return 40.0
+	default:
+		return 16.0
+	}
+}
+
+// distPointToSegment computes the minimum Euclidean distance from point (px, py) to segment (x1, y1)-(x2, y2).
+func distPointToSegment(px, py, x1, y1, x2, y2 float64) float64 {
+	dx := x2 - x1
+	dy := y2 - y1
+	lenSq := dx*dx + dy*dy
+	if lenSq == 0 {
+		return math.Hypot(px-x1, py-y1)
+	}
+	t := ((px-x1)*dx + (py-y1)*dy) / lenSq
+	if t < 0 {
+		return math.Hypot(px-x1, py-y1)
+	}
+	if t > 1 {
+		return math.Hypot(px-x2, py-y2)
+	}
+	projX := x1 + t*dx
+	projY := y1 + t*dy
+	return math.Hypot(px-projX, py-projY)
+}
+
+// updateHoverTargets updates which map entity is hovered based on cursor position and active edit mode.
+func (e *EditorMode) updateHoverTargets(mx, my int) {
+	e.hoveredVertex = -1
+	e.hoveredLinedef = -1
+	e.hoveredSector = -1
+	e.hoveredThing = -1
+
+	// Only track hover when cursor is inside the 400x392 editing window
+	if mx < 0 || mx >= EditingWindowWidth || my < 0 || my >= EditingWindowHeight {
+		return
+	}
+
+	md := e.MapData()
+	if md == nil {
+		return
+	}
+
+	curX := float64(mx)
+	curY := float64(my)
+	const maxScreenDist = 5.0
+
+	switch e.editMode {
+	case EditModeVertex:
+		minDist := maxScreenDist
+		for i, v := range md.Vertexes {
+			vx, vy := e.WorldToScreen(float64(v.X), float64(v.Y))
+			dist := math.Hypot(curX-vx, curY-vy)
+			if dist <= maxScreenDist && dist < minDist {
+				minDist = dist
+				e.hoveredVertex = i
+			}
+		}
+
+	case EditModeLine:
+		minDist := maxScreenDist
+		for i, ld := range md.Linedefs {
+			if int(ld.V1) < len(md.Vertexes) && int(ld.V2) < len(md.Vertexes) {
+				v1 := md.Vertexes[ld.V1]
+				v2 := md.Vertexes[ld.V2]
+				x1, y1 := e.WorldToScreen(float64(v1.X), float64(v1.Y))
+				x2, y2 := e.WorldToScreen(float64(v2.X), float64(v2.Y))
+				dist := distPointToSegment(curX, curY, x1, y1, x2, y2)
+				if dist <= maxScreenDist && dist < minDist {
+					minDist = dist
+					e.hoveredLinedef = i
+				}
+			}
+		}
+
+	case EditModeSector:
+		wx, wy := e.ScreenToWorld(curX, curY)
+		if secIdx, ok := md.SectorIndexAt(wx, wy); ok {
+			e.hoveredSector = secIdx
+		}
+
+	case EditModeThing:
+		minDist := math.MaxFloat64
+		for i, t := range md.Things {
+			tx, ty := e.WorldToScreen(float64(t.X), float64(t.Y))
+			radius := GetThingRadius(t.Type)
+			screenRadius := radius * e.ZoomScale()
+			if screenRadius < 2.0 {
+				screenRadius = 2.0
+			}
+			dist := math.Hypot(curX-tx, curY-ty)
+			if dist <= screenRadius+maxScreenDist && dist < minDist {
+				minDist = dist
+				e.hoveredThing = i
+			}
+		}
+	}
 }
 
 // SetWAD updates the WAD container reference for the editor.
@@ -629,6 +773,23 @@ func (e *EditorMode) Update() error {
 		e.camY -= panStep
 	}
 
+	// Mode switching with 1, 2, 3, 4 number keys
+	if inpututil.IsKeyJustPressed(ebiten.Key1) || inpututil.IsKeyJustPressed(ebiten.KeyDigit1) || inpututil.IsKeyJustPressed(ebiten.KeyNumpad1) {
+		e.SetEditMode(EditModeVertex)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.Key2) || inpututil.IsKeyJustPressed(ebiten.KeyDigit2) || inpututil.IsKeyJustPressed(ebiten.KeyNumpad2) {
+		e.SetEditMode(EditModeLine)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.Key3) || inpututil.IsKeyJustPressed(ebiten.KeyDigit3) || inpututil.IsKeyJustPressed(ebiten.KeyNumpad3) {
+		e.SetEditMode(EditModeSector)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.Key4) || inpututil.IsKeyJustPressed(ebiten.KeyDigit4) || inpututil.IsKeyJustPressed(ebiten.KeyNumpad4) {
+		e.SetEditMode(EditModeThing)
+	}
+
+	// Update hover targets based on cursor location
+	e.updateHoverTargets(mx, my)
+
 	// Center camera on map with C or Home key
 	if inpututil.IsKeyJustPressed(ebiten.KeyC) || inpututil.IsKeyJustPressed(ebiten.KeyHome) {
 		e.CenterOnMap()
@@ -651,10 +812,7 @@ func (e *EditorMode) Update() error {
 		if isHovered && leftClick && e.buttons[i].Enabled {
 			if e.buttons[i].IsToggle {
 				// Radio-group behavior: exactly one toggle button active at all times
-				for j := 3; j <= 6; j++ {
-					e.buttons[j].Active = (j == i)
-				}
-				e.editMode = EditMode(i - 3)
+				e.SetEditMode(EditMode(i - 3))
 			}
 			if e.buttons[i].OnClick != nil {
 				e.buttons[i].OnClick(e)
@@ -691,7 +849,7 @@ func (e *EditorMode) Draw(screen *ebiten.Image) {
 	screen.DrawImage(e.buffer, op)
 }
 
-// drawEditingWindow renders the editing background, darker grid lines, and map geometry (linedefs and vertices).
+// drawEditingWindow renders the editing background, darker grid lines, map geometry, things, and vertices.
 func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 	// Fill editing area background with black
 	vector.DrawFilledRect(dst, 0, 0, EditingWindowWidth, EditingWindowHeight, gfx.EGABlack, false)
@@ -732,7 +890,7 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 		}
 	}
 
-	// 2. Draw map geometry (linedefs and vertices) in white
+	// 2. Draw map geometry (linedefs, things, vertices)
 	md := e.MapData()
 	if md != nil {
 		if !e.hasCenteredCam || e.lastMapData != md {
@@ -741,27 +899,81 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 			e.CenterOnMap()
 		}
 
-		white := gfx.EGABrightWhite
-
-		// Draw 1px-wide linedef lines
-		for _, ld := range md.Linedefs {
+		// 2a. Draw linedefs (1px-wide lines, highlighted in lime green when hovered or sector selected)
+		for i, ld := range md.Linedefs {
 			if int(ld.V1) < len(md.Vertexes) && int(ld.V2) < len(md.Vertexes) {
 				v1 := md.Vertexes[ld.V1]
 				v2 := md.Vertexes[ld.V2]
 				x1, y1 := e.WorldToScreen(float64(v1.X), float64(v1.Y))
 				x2, y2 := e.WorldToScreen(float64(v2.X), float64(v2.Y))
-				vector.StrokeLine(dst, float32(x1), float32(y1), float32(x2), float32(y2), 1.0, white, true)
+
+				lineColor := gfx.EGABrightWhite
+				if e.editMode == EditModeLine && e.hoveredLinedef == i {
+					lineColor = gfx.EGABrightGreen
+				} else if e.editMode == EditModeSector && e.hoveredSector >= 0 {
+					isSectorLine := false
+					if ld.RightSide != 0xFFFF && int(ld.RightSide) < len(md.Sidedefs) && int(md.Sidedefs[ld.RightSide].Sector) == e.hoveredSector {
+						isSectorLine = true
+					}
+					if ld.LeftSide != 0xFFFF && int(ld.LeftSide) < len(md.Sidedefs) && int(md.Sidedefs[ld.LeftSide].Sector) == e.hoveredSector {
+						isSectorLine = true
+					}
+					if isSectorLine {
+						lineColor = gfx.EGABrightGreen
+					}
+				}
+
+				vector.StrokeLine(dst, float32(x1), float32(y1), float32(x2), float32(y2), 1.0, lineColor, true)
 			}
 		}
 
-		// Draw vertices as chunky squares (4x4)
+		// 2b. Draw Things as EGA Bright Cyan squares with crosses through them (the size of the entity)
+		for i, t := range md.Things {
+			tx, ty := e.WorldToScreen(float64(t.X), float64(t.Y))
+			radius := GetThingRadius(t.Type)
+			screenRadius := radius * e.ZoomScale()
+			boxSize := screenRadius * 2.0
+			if boxSize < 4.0 {
+				boxSize = 4.0
+			}
+			halfBox := boxSize / 2.0
+
+			// Screen bounding box check
+			if tx+halfBox < 0 || tx-halfBox > float64(EditingWindowWidth) ||
+				ty+halfBox < 0 || ty-halfBox > float64(EditingWindowHeight) {
+				continue
+			}
+
+			thingColor := gfx.EGABrightCyan
+			if e.editMode == EditModeThing && e.hoveredThing == i {
+				thingColor = gfx.EGABrightGreen
+			}
+
+			left := float32(tx - halfBox)
+			top := float32(ty - halfBox)
+			w := float32(boxSize)
+			h := float32(boxSize)
+
+			// Draw square outline
+			vector.StrokeRect(dst, left, top, w, h, 1.0, thingColor, true)
+
+			// Draw diagonal cross through the square
+			vector.StrokeLine(dst, left, top, left+w, top+h, 1.0, thingColor, true)
+			vector.StrokeLine(dst, left+w, top, left, top+h, 1.0, thingColor, true)
+		}
+
+		// 2c. Draw vertices as chunky squares (4x4, highlighted in lime green when hovered)
 		const vertexSize = 4.0
 		const halfVertex = vertexSize / 2.0
-		for _, v := range md.Vertexes {
+		for i, v := range md.Vertexes {
 			vx, vy := e.WorldToScreen(float64(v.X), float64(v.Y))
 			if vx >= -10 && vx <= float64(EditingWindowWidth)+10 &&
 				vy >= -10 && vy <= float64(EditingWindowHeight)+10 {
-				vector.DrawFilledRect(dst, float32(vx)-halfVertex, float32(vy)-halfVertex, vertexSize, vertexSize, white, false)
+				vColor := gfx.EGABrightWhite
+				if e.editMode == EditModeVertex && e.hoveredVertex == i {
+					vColor = gfx.EGABrightGreen
+				}
+				vector.DrawFilledRect(dst, float32(vx)-halfVertex, float32(vy)-halfVertex, vertexSize, vertexSize, vColor, false)
 			}
 		}
 	}

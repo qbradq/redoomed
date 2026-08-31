@@ -490,3 +490,165 @@ func TestEditorMapDataRendering(t *testing.T) {
 	ed.Draw(screen)
 }
 
+func TestEditorThingsRendering(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
+	}
+
+	ed := NewEditorMode(cf, nil)
+
+	mockMap := &wad.MapData{
+		Name: "TESTMAP",
+		Things: []wad.Thing{
+			{X: 0, Y: 0, Type: 1},      // Player 1 start (radius 16)
+			{X: 100, Y: 100, Type: 3004}, // Zombieman (radius 20)
+		},
+	}
+	ed.SetMapData(mockMap)
+
+	screen := ebiten.NewImage(1280, 800)
+	ed.Draw(screen)
+}
+
+func TestEditorHoverTrackingAndHighlighting(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
+	}
+
+	ed := NewEditorMode(cf, nil)
+	ed.SetZoomLevel(6) // 1.0 scale (1 map unit = 1 pixel)
+	ed.SetCamPosition(0, 0)
+
+	// Map center is at editing window center (200, 196)
+	mockMap := &wad.MapData{
+		Name: "TESTMAP",
+		Vertexes: []wad.Vertex{
+			{X: -50, Y: 0},
+			{X: 50, Y: 0},
+			{X: 50, Y: 50},
+			{X: -50, Y: 50},
+		},
+		Linedefs: []wad.Linedef{
+			{V1: 0, V2: 1, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 1, V2: 2, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 2, V2: 3, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 3, V2: 0, RightSide: 0, LeftSide: 0xFFFF},
+		},
+		Sidedefs: []wad.Sidedef{
+			{Sector: 0},
+		},
+		Sectors: []wad.Sector{
+			{FloorHeight: 0, CeilingHeight: 128},
+		},
+		Things: []wad.Thing{
+			{X: 0, Y: 0, Type: 1}, // Center at (200, 196)
+		},
+	}
+	ed.SetMapData(mockMap)
+	ed.SetCamPosition(0, 0) // Re-center at (0, 0)
+
+	// Screen position of vertex 0 (-50, 0): (200 - 50, 196) = (150, 196)
+	// Screen position of vertex 1 (50, 0): (200 + 50, 196) = (250, 196)
+
+	// 1. Vertex Mode
+	ed.SetEditMode(EditModeVertex)
+
+	// Cursor at (152, 196) -> distance = 2 pixels <= 5px -> should highlight vertex 0
+	ed.updateHoverTargets(152, 196)
+	if ed.HoveredVertex() != 0 {
+		t.Errorf("expected hovered vertex 0, got %d", ed.HoveredVertex())
+	}
+
+	// Cursor at (160, 196) -> distance = 10 pixels > 5px -> no hover
+	ed.updateHoverTargets(160, 196)
+	if ed.HoveredVertex() != -1 {
+		t.Errorf("expected no hovered vertex (>5px), got %d", ed.HoveredVertex())
+	}
+
+	// 2. Line Mode
+	ed.SetEditMode(EditModeLine)
+
+	// Line 0 is from (150, 196) to (250, 196). Cursor at (200, 198) -> dist = 2px <= 5px -> should highlight line 0
+	ed.updateHoverTargets(200, 198)
+	if ed.HoveredLinedef() != 0 {
+		t.Errorf("expected hovered linedef 0, got %d", ed.HoveredLinedef())
+	}
+
+	// Cursor at (200, 210) -> dist = 14px > 5px -> no hover
+	ed.updateHoverTargets(200, 210)
+	if ed.HoveredLinedef() != -1 {
+		t.Errorf("expected no hovered linedef (>5px), got %d", ed.HoveredLinedef())
+	}
+
+	// 3. Sector Mode (only highlights when cursor is in a sector)
+	ed.SetEditMode(EditModeSector)
+
+	// Mock map without subsectors returns -1 (not inside a valid BSP sector)
+	ed.updateHoverTargets(200, 198)
+	if ed.HoveredSector() != -1 {
+		t.Errorf("expected no hovered sector without subsectors, got %d", ed.HoveredSector())
+	}
+
+	// 4. Thing Mode
+	ed.SetEditMode(EditModeThing)
+	// Thing 0 is at (200, 196) with radius 16. Cursor at (205, 196) -> dist = 5px <= radius+5px -> hovered
+	ed.updateHoverTargets(205, 196)
+	if ed.HoveredThing() != 0 {
+		t.Errorf("expected hovered thing 0, got %d", ed.HoveredThing())
+	}
+
+	// Cursor outside editing window (e.g. at user panel mx=450)
+	ed.updateHoverTargets(450, 100)
+	if ed.HoveredThing() != -1 || ed.HoveredVertex() != -1 || ed.HoveredLinedef() != -1 || ed.HoveredSector() != -1 {
+		t.Error("expected all hover targets to reset outside editing window")
+	}
+
+	// Drawing with hover targets set
+	screen := ebiten.NewImage(1280, 800)
+	ed.Draw(screen)
+}
+
+func TestEditorSectorModeHighlightFreedoom2(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
+	}
+
+	w, err := wad.Open("../../freedoom2.wad")
+	if err != nil {
+		t.Skipf("skipping freedoom2 test: %v", err)
+	}
+	defer w.Close()
+
+	md, err := w.LoadMap("MAP01")
+	if err != nil {
+		t.Fatalf("LoadMap failed: %v", err)
+	}
+
+	ed := NewEditorMode(cf, w)
+	ed.SetMapData(md)
+	ed.SetEditMode(EditModeSector)
+
+	p1, ok := md.Player1Start()
+	if !ok {
+		t.Fatal("expected player 1 start in MAP01")
+	}
+
+	// Center on player start and test cursor at center of screen (200, 196)
+	ed.SetCamPosition(float64(p1.X), float64(p1.Y))
+	ed.updateHoverTargets(200, 196)
+
+	if ed.HoveredSector() < 0 {
+		t.Errorf("expected player starting sector to be highlighted, got %d", ed.HoveredSector())
+	}
+
+	// Move cursor to outer void (e.g. at far coordinates outside the map)
+	ed.SetCamPosition(-50000, -50000)
+	ed.updateHoverTargets(200, 196)
+	if ed.HoveredSector() != -1 {
+		t.Errorf("expected no sector highlighted in void, got %d", ed.HoveredSector())
+	}
+}
+

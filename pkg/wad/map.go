@@ -549,24 +549,39 @@ func (m *MapData) FindSubsector(x, y float64) int {
 
 // SectorAt returns the sector containing the point (x, y) if found.
 func (m *MapData) SectorAt(x, y float64) (*Sector, bool) {
-	if len(m.Subsectors) == 0 || len(m.Segs) == 0 {
+	secIdx, ok := m.SectorIndexAt(x, y)
+	if !ok {
 		return nil, false
 	}
+	return &m.Sectors[secIdx], true
+}
+
+// SectorIndexAt returns the sector index containing the point (x, y) if found.
+func (m *MapData) SectorIndexAt(x, y float64) (int, bool) {
+	if len(m.Subsectors) == 0 || len(m.Segs) == 0 {
+		return -1, false
+	}
+	minX, maxX, minY, maxY := m.Bounds()
+	if x < float64(minX) || x > float64(maxX) || y < float64(minY) || y > float64(maxY) {
+		return -1, false
+	}
+
 	ssIdx := m.FindSubsector(x, y)
 	if ssIdx < 0 || ssIdx >= len(m.Subsectors) {
-		return nil, false
+		return -1, false
 	}
 	ss := &m.Subsectors[ssIdx]
 	if ss.NumSegs == 0 {
-		return nil, false
+		return -1, false
 	}
+
 	firstSeg := int(ss.FirstSeg)
 	if firstSeg < 0 || firstSeg >= len(m.Segs) {
-		return nil, false
+		return -1, false
 	}
 	seg := &m.Segs[firstSeg]
 	if int(seg.Linedef) >= len(m.Linedefs) {
-		return nil, false
+		return -1, false
 	}
 	ld := &m.Linedefs[seg.Linedef]
 
@@ -577,11 +592,11 @@ func (m *MapData) SectorAt(x, y float64) (*Sector, bool) {
 		sidedefIdx = ld.LeftSide
 	}
 	if sidedefIdx == 0xFFFF || int(sidedefIdx) >= len(m.Sidedefs) {
-		return nil, false
+		return -1, false
 	}
-	secIdx := m.Sidedefs[sidedefIdx].Sector
-	if int(secIdx) >= len(m.Sectors) {
-		return nil, false
+	secIdx := int(m.Sidedefs[sidedefIdx].Sector)
+	if secIdx >= len(m.Sectors) {
+		return -1, false
 	}
-	return &m.Sectors[secIdx], true
+	return secIdx, true
 }
