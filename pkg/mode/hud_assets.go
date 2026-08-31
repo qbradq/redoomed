@@ -10,6 +10,13 @@ import (
 	"github.com/qbradq/redoomed/pkg/wad"
 )
 
+// HUDPatch pairs a decoded patch texture with its authentic Doom layout offsets.
+type HUDPatch struct {
+	Image      *ebiten.Image
+	LeftOffset int
+	TopOffset  int
+}
+
 // HUDAssets contains preloaded and cached Ebitengine textures for status bar rendering.
 type HUDAssets struct {
 	STBAR       *ebiten.Image
@@ -20,13 +27,13 @@ type HUDAssets struct {
 	SmallNums   [10]*ebiten.Image // STYSNUM0 - STYSNUM9 (yellow)
 	GrayNums    [10]*ebiten.Image // STGNUM0 - STGNUM9 (gray)
 	Keys        [9]*ebiten.Image  // STKEYS0 - STKEYS8
-	Faces       map[string]*ebiten.Image
+	Faces       map[string]*HUDPatch
 }
 
 // NewHUDAssets loads status bar patches from the given WAD file.
 func NewHUDAssets(w *wad.WAD) *HUDAssets {
 	assets := &HUDAssets{
-		Faces: make(map[string]*ebiten.Image),
+		Faces: make(map[string]*HUDPatch),
 	}
 	if w == nil {
 		return assets
@@ -89,9 +96,18 @@ func NewHUDAssets(w *wad.WAD) *HUDAssets {
 		faceLumps = append(faceLumps, fmt.Sprintf("STFTR%d0", tier))
 	}
 
+	playpal, _ := w.GetLump("PLAYPAL")
 	for _, lump := range faceLumps {
-		if img, err := w.GetPatchImage(lump); err == nil {
-			assets.Faces[lump] = img
+		if patch, err := w.GetPatch(lump); err == nil {
+			if len(playpal) >= 768 {
+				if img, err := patch.ToImage(playpal[:768]); err == nil {
+					assets.Faces[lump] = &HUDPatch{
+						Image:      img,
+						LeftOffset: patch.LeftOffset,
+						TopOffset:  patch.TopOffset,
+					}
+				}
+			}
 		}
 	}
 
@@ -241,17 +257,19 @@ func (a *HUDAssets) DrawArms(target *ebiten.Image, ps *player.PlayerStats, x, y 
 	}
 }
 
-// DrawFace renders the current mugshot face patch frame at (x, y).
+// DrawFace renders the current mugshot face patch frame at (x, y), applying Doom patch offsets for centering.
 func (a *HUDAssets) DrawFace(target *ebiten.Image, frameName string, x, y int) {
-	img, ok := a.Faces[frameName]
-	if !ok || img == nil {
+	patch, ok := a.Faces[frameName]
+	if !ok || patch == nil || patch.Image == nil {
 		// Fallback to basic straight face if specific animation is missing
-		img = a.Faces["STFST00"]
+		patch = a.Faces["STFST00"]
 	}
-	if img != nil {
+	if patch != nil && patch.Image != nil {
 		op := &ebiten.DrawImageOptions{}
 		op.Filter = ebiten.FilterNearest
-		op.GeoM.Translate(float64(x), float64(y))
-		target.DrawImage(img, op)
+		drawX := x - patch.LeftOffset
+		drawY := y - patch.TopOffset
+		op.GeoM.Translate(float64(drawX), float64(drawY))
+		target.DrawImage(patch.Image, op)
 	}
 }

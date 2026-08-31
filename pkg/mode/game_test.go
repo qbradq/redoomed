@@ -598,7 +598,7 @@ func TestHUDLayerWithPlayerStats(t *testing.T) {
 		STARMS:      ebiten.NewImage(40, 32),
 		TallMinus:   ebiten.NewImage(9, 16),
 		TallPercent: ebiten.NewImage(9, 16),
-		Faces:       make(map[string]*ebiten.Image),
+		Faces:       make(map[string]*HUDPatch),
 	}
 	for i := 0; i <= 9; i++ {
 		assets.TallNums[i] = ebiten.NewImage(9, 16)
@@ -608,9 +608,9 @@ func TestHUDLayerWithPlayerStats(t *testing.T) {
 	for i := 0; i <= 8; i++ {
 		assets.Keys[i] = ebiten.NewImage(8, 5)
 	}
-	assets.Faces["STFST00"] = ebiten.NewImage(24, 29)
-	assets.Faces["STFOUCH0"] = ebiten.NewImage(24, 29)
-	assets.Faces["STFEVL0"] = ebiten.NewImage(24, 29)
+	assets.Faces["STFST00"] = &HUDPatch{Image: ebiten.NewImage(24, 29), LeftOffset: -5, TopOffset: -2}
+	assets.Faces["STFOUCH0"] = &HUDPatch{Image: ebiten.NewImage(24, 29), LeftOffset: -5, TopOffset: -2}
+	assets.Faces["STFEVL0"] = &HUDPatch{Image: ebiten.NewImage(24, 29), LeftOffset: -5, TopOffset: -2}
 
 	hud.SetAssets(assets)
 	if hud.Assets() != assets {
