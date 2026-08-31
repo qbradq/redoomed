@@ -58,12 +58,18 @@ type ConsoleMode struct {
 	savedCurrentInput string
 	cursorTick        int
 
-	onClose func()
+	onClose        func()
+	onToggleEditor func()
 }
 
 // SetOnClose sets the callback invoked when the console is toggled closed (e.g. via tilde key).
 func (c *ConsoleMode) SetOnClose(fn func()) {
 	c.onClose = fn
+}
+
+// SetOnToggleEditor sets the callback invoked when F12 is pressed in console mode.
+func (c *ConsoleMode) SetOnToggleEditor(fn func()) {
+	c.onToggleEditor = fn
 }
 
 // SetREPL assigns a Tengo REPL instance to the console and wires output to console.Print.
@@ -281,6 +287,14 @@ func (c *ConsoleMode) Update() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyGraveAccent) {
 		if c.onClose != nil {
 			c.onClose()
+		}
+		return nil
+	}
+
+	// Toggle editor on F12
+	if inpututil.IsKeyJustPressed(ebiten.KeyF12) {
+		if c.onToggleEditor != nil {
+			c.onToggleEditor()
 		}
 		return nil
 	}

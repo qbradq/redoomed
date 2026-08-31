@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -41,11 +42,12 @@ type LumpInfo struct {
 
 // WAD represents a loaded Doom WAD (IWAD or PWAD) container.
 type WAD struct {
-	wadType string
-	reader  io.ReaderAt
-	closer  io.Closer
-	lumps   []LumpInfo
-	lumpMap map[string]int // maps uppercase lump name to last lump index (PWAD override semantics)
+	filename string
+	wadType  string
+	reader   io.ReaderAt
+	closer   io.Closer
+	lumps    []LumpInfo
+	lumpMap  map[string]int // maps uppercase lump name to last lump index (PWAD override semantics)
 }
 
 // Open opens a WAD file from the local file system.
@@ -67,7 +69,23 @@ func Open(filename string) (*WAD, error) {
 		return nil, err
 	}
 	w.closer = file
+	w.filename = filepath.Base(filename)
 	return w, nil
+}
+
+// Filename returns the base filename of the loaded WAD, or empty string if not loaded from a file.
+func (w *WAD) Filename() string {
+	if w == nil {
+		return ""
+	}
+	return w.filename
+}
+
+// SetFilename sets the base filename associated with this WAD.
+func (w *WAD) SetFilename(name string) {
+	if w != nil {
+		w.filename = filepath.Base(name)
+	}
 }
 
 // OpenReader initializes a WAD container from an io.ReaderAt source.

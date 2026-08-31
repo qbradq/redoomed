@@ -271,6 +271,13 @@ func (g *GameMode) SetOnToggleConsole(fn func()) {
 	}
 }
 
+// SetOnToggleEditor updates the editor toggle handler in the common layer.
+func (g *GameMode) SetOnToggleEditor(fn func()) {
+	if g.commonLayer != nil {
+		g.commonLayer.SetOnToggleEditor(fn)
+	}
+}
+
 // SetOnLog sets the callback for logging game events (e.g. debug messages).
 func (g *GameMode) SetOnLog(fn func(string)) {
 	g.onLog = fn

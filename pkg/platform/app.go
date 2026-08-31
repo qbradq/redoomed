@@ -31,6 +31,7 @@ type App struct {
 	musicMgr      *audio.MusicManager
 	consoleMode   *mode.ConsoleMode
 	gameMode      *mode.GameMode
+	editorMode    *mode.EditorMode
 	currentMode   mode.Mode
 	previousMode  mode.Mode
 	exitRequested bool
@@ -103,13 +104,28 @@ func NewAppWithIWAD(iwadPath string) *App {
 	app.consoleMode.SetOnClose(func() {
 		app.ToggleConsole()
 	})
+	app.consoleMode.SetOnToggleEditor(func() {
+		app.ToggleEditor()
+	})
 
 	// Initialize GameMode with 7-layer stack
 	app.gameMode = mode.NewGameMode("", app.wadFile, func() {
 		app.ToggleConsole()
 	})
+	app.gameMode.SetOnToggleEditor(func() {
+		app.ToggleEditor()
+	})
 	app.gameMode.SetOnLog(func(msg string) {
 		app.consoleMode.PrintColored(msg, gfx.EGABrightCyan)
+	})
+
+	// Initialize EditorMode at 1280x800 resolution
+	app.editorMode = mode.NewEditorMode(app.consoleFont, app.wadFile)
+	app.editorMode.SetOnToggle(func() {
+		app.ToggleEditor()
+	})
+	app.editorMode.SetOnToggleConsole(func() {
+		app.ToggleConsole()
 	})
 
 	// Initialize Tengo REPL with exit, start_map, and music handlers
@@ -195,6 +211,9 @@ func (a *App) underlyingMode() mode.Mode {
 	if a.gameMode != nil {
 		return a.gameMode
 	}
+	if a.editorMode != nil {
+		return a.editorMode
+	}
 	return nil
 }
 
@@ -210,6 +229,24 @@ func (a *App) ToggleConsole() {
 	} else {
 		a.previousMode = a.currentMode
 		a.currentMode = a.consoleMode
+	}
+	a.updateCursorMode()
+}
+
+// ToggleEditor toggles between EditorMode and the previously active mode (GameMode, ConsoleMode, etc.).
+func (a *App) ToggleEditor() {
+	if a.currentMode == a.editorMode {
+		if a.previousMode != nil && a.previousMode != a.editorMode {
+			a.currentMode = a.previousMode
+		} else if a.gameMode != nil {
+			a.currentMode = a.gameMode
+		}
+		if a.gameMode != nil && a.gameMode.GameControlsLayer() != nil {
+			a.gameMode.GameControlsLayer().ResetMouse()
+		}
+	} else {
+		a.previousMode = a.currentMode
+		a.currentMode = a.editorMode
 	}
 	a.updateCursorMode()
 }
@@ -246,6 +283,11 @@ func (a *App) GameMode() *mode.GameMode {
 // ConsoleMode returns the ConsoleMode instance.
 func (a *App) ConsoleMode() *mode.ConsoleMode {
 	return a.consoleMode
+}
+
+// EditorMode returns the EditorMode instance.
+func (a *App) EditorMode() *mode.EditorMode {
+	return a.editorMode
 }
 
 // PreviousMode returns the previously active application mode, or nil if none.

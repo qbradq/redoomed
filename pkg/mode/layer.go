@@ -31,10 +31,11 @@ type Layer interface {
 	PreventsLowerDrawing() bool
 }
 
-// CommonLayer handles engine-level common inputs (e.g. console toggle) and renders nothing.
+// CommonLayer handles engine-level common inputs (e.g. console toggle, editor toggle) and renders nothing.
 type CommonLayer struct {
 	visible         bool
 	onToggleConsole func()
+	onToggleEditor  func()
 }
 
 // NewCommonLayer creates a new CommonLayer.
@@ -54,6 +55,12 @@ func (l *CommonLayer) Update() (bool, error) {
 		}
 		return true, nil
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyF12) {
+		if l.onToggleEditor != nil {
+			l.onToggleEditor()
+		}
+		return true, nil
+	}
 	return false, nil
 }
 
@@ -68,6 +75,11 @@ func (l *CommonLayer) PreventsLowerDrawing() bool { return false }
 // SetOnToggleConsole sets the console toggle callback.
 func (l *CommonLayer) SetOnToggleConsole(fn func()) {
 	l.onToggleConsole = fn
+}
+
+// SetOnToggleEditor sets the editor toggle callback.
+func (l *CommonLayer) SetOnToggleEditor(fn func()) {
+	l.onToggleEditor = fn
 }
 
 // GameMenuLayer represents the main menu and options menu layer.

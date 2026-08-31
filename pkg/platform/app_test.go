@@ -303,4 +303,50 @@ func TestAppCursorMode(t *testing.T) {
 	}
 }
 
+func TestAppToggleEditor(t *testing.T) {
+	app := NewApp()
+
+	if app.EditorMode() == nil {
+		t.Fatal("expected app.EditorMode() to be non-nil")
+	}
+
+	// Initially in GameMode after autoexec
+	if _, ok := app.CurrentMode().(*mode.GameMode); !ok {
+		t.Fatalf("expected initial mode to be GameMode, got %T", app.CurrentMode())
+	}
+
+	// Toggle to EditorMode
+	app.ToggleEditor()
+	if _, ok := app.CurrentMode().(*mode.EditorMode); !ok {
+		t.Fatalf("expected CurrentMode to be EditorMode after ToggleEditor(), got %T", app.CurrentMode())
+	}
+	if ebiten.CursorMode() != ebiten.CursorModeVisible {
+		t.Errorf("expected cursor to be visible in EditorMode, got %v", ebiten.CursorMode())
+	}
+
+	// Toggle back to GameMode
+	app.ToggleEditor()
+	if _, ok := app.CurrentMode().(*mode.GameMode); !ok {
+		t.Fatalf("expected CurrentMode to return to GameMode after second ToggleEditor(), got %T", app.CurrentMode())
+	}
+
+	// Toggle console, then toggle editor
+	app.ToggleConsole()
+	if _, ok := app.CurrentMode().(*mode.ConsoleMode); !ok {
+		t.Fatalf("expected ConsoleMode, got %T", app.CurrentMode())
+	}
+
+	app.ToggleEditor()
+	if _, ok := app.CurrentMode().(*mode.EditorMode); !ok {
+		t.Fatalf("expected EditorMode after ToggleEditor from console, got %T", app.CurrentMode())
+	}
+
+	// Draw and update while in EditorMode
+	screen := ebiten.NewImage(1280, 800)
+	app.Draw(screen)
+	if err := app.Update(); err != nil {
+		t.Errorf("app.Update() in EditorMode returned error: %v", err)
+	}
+}
+
 
