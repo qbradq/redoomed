@@ -652,3 +652,268 @@ func TestEditorSectorModeHighlightFreedoom2(t *testing.T) {
 	}
 }
 
+func TestEditorSelectionTracking(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
+	}
+
+	ed := NewEditorMode(cf, nil)
+
+	// 1. Vertex Selection
+	ed.SetEditMode(EditModeVertex)
+	if ed.SelectionCount() != 0 {
+		t.Errorf("expected 0 selections initially, got %d", ed.SelectionCount())
+	}
+
+	// Single select vertex 2
+	ed.SelectVertex(2, false)
+	if !ed.IsVertexSelected(2) || ed.IsVertexSelected(1) || ed.SelectionCount() != 1 {
+		t.Errorf("expected vertex 2 selected, got %+v", ed.SelectedVertexes())
+	}
+
+	// Single select vertex 5 (replaces vertex 2)
+	ed.SelectVertex(5, false)
+	if !ed.IsVertexSelected(5) || ed.IsVertexSelected(2) || ed.SelectionCount() != 1 {
+		t.Errorf("expected vertex 5 selected, got %+v", ed.SelectedVertexes())
+	}
+
+	// Multi-select: toggle vertex 2 (adds)
+	ed.SelectVertex(2, true)
+	if !ed.IsVertexSelected(5) || !ed.IsVertexSelected(2) || ed.SelectionCount() != 2 {
+		t.Errorf("expected vertex 5 and 2 selected, got %+v", ed.SelectedVertexes())
+	}
+
+	// Multi-select: toggle vertex 5 (removes)
+	ed.SelectVertex(5, true)
+	if ed.IsVertexSelected(5) || !ed.IsVertexSelected(2) || ed.SelectionCount() != 1 {
+		t.Errorf("expected only vertex 2 selected after toggle off, got %+v", ed.SelectedVertexes())
+	}
+
+	// Clear selection
+	ed.ClearSelection()
+	if ed.SelectionCount() != 0 {
+		t.Errorf("expected 0 selections after ClearSelection, got %d", ed.SelectionCount())
+	}
+
+	// 2. Line Selection
+	ed.SetEditMode(EditModeLine)
+	ed.SelectLine(10, false)
+	ed.SelectLine(20, true)
+	if !ed.IsLineSelected(10) || !ed.IsLineSelected(20) || ed.SelectionCount() != 2 {
+		t.Errorf("expected lines 10 and 20 selected, got %+v", ed.SelectedLines())
+	}
+	ed.ClearSelection()
+	if ed.SelectionCount() != 0 {
+		t.Errorf("expected 0 selections after line ClearSelection, got %d", ed.SelectionCount())
+	}
+
+	// 3. Sector Selection
+	ed.SetEditMode(EditModeSector)
+	ed.SelectSector(3, false)
+	ed.SelectSector(7, true)
+	if !ed.IsSectorSelected(3) || !ed.IsSectorSelected(7) || ed.SelectionCount() != 2 {
+		t.Errorf("expected sectors 3 and 7 selected, got %+v", ed.SelectedSectors())
+	}
+	ed.ClearSelection()
+	if ed.SelectionCount() != 0 {
+		t.Errorf("expected 0 selections after sector ClearSelection, got %d", ed.SelectionCount())
+	}
+
+	// 4. Thing Selection
+	ed.SetEditMode(EditModeThing)
+	ed.SelectThing(1, false)
+	ed.SelectThing(4, true)
+	if !ed.IsThingSelected(1) || !ed.IsThingSelected(4) || ed.SelectionCount() != 2 {
+		t.Errorf("expected things 1 and 4 selected, got %+v", ed.SelectedThings())
+	}
+	ed.ClearSelection()
+	if ed.SelectionCount() != 0 {
+		t.Errorf("expected 0 selections after thing ClearSelection, got %d", ed.SelectionCount())
+	}
+}
+
+func TestEditorInspectorPropertiesSingleAndMulti(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
+	}
+
+	ed := NewEditorMode(cf, nil)
+	mockMap := &wad.MapData{
+		Name: "TESTMAP",
+		Vertexes: []wad.Vertex{
+			{X: 100, Y: 200},
+			{X: 100, Y: 300},
+		},
+		Linedefs: []wad.Linedef{
+			{V1: 0, V2: 1, Flags: 1, Special: 0, Tag: 5, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 1, V2: 0, Flags: 1, Special: 11, Tag: 5, RightSide: 0, LeftSide: 1},
+		},
+		Sectors: []wad.Sector{
+			{FloorHeight: 0, CeilingHeight: 128, FloorPic: "FLOOR0_1", CeilingPic: "CEIL1_1", LightLevel: 160, Special: 0, Tag: 5},
+			{FloorHeight: 64, CeilingHeight: 128, FloorPic: "FLOOR0_1", CeilingPic: "CEIL1_2", LightLevel: 160, Special: 0, Tag: 5},
+		},
+		Things: []wad.Thing{
+			{X: 100, Y: 200, Angle: 90, Type: 1, Flags: 7},
+			{X: 150, Y: 200, Angle: 90, Type: 1, Flags: 7},
+		},
+	}
+	ed.SetMapData(mockMap)
+
+	// 1. Vertex inspector
+	ed.SetEditMode(EditModeVertex)
+
+	// Single vertex 0
+	propsV0 := ed.InspectorProperties([]int{0})
+	expectedV0 := map[string]string{
+		"Index": "0",
+		"X":     "100",
+		"Y":     "200",
+	}
+	for _, p := range propsV0 {
+		if expectedV0[p.Name] != p.Value {
+			t.Errorf("vertex 0 prop %s mismatch: got %s, want %s", p.Name, p.Value, expectedV0[p.Name])
+		}
+	}
+
+	// Multi vertex [0, 1] -> X matches (100), Y differs ([many]), Index differs ([many])
+	propsVMulti := ed.InspectorProperties([]int{0, 1})
+	expectedVMulti := map[string]string{
+		"Index": "[many]",
+		"X":     "100",
+		"Y":     "[many]",
+	}
+	for _, p := range propsVMulti {
+		if expectedVMulti[p.Name] != p.Value {
+			t.Errorf("vertex multi prop %s mismatch: got %s, want %s", p.Name, p.Value, expectedVMulti[p.Name])
+		}
+	}
+
+	// 2. Line inspector
+	ed.SetEditMode(EditModeLine)
+	propsLMulti := ed.InspectorProperties([]int{0, 1})
+	expectedLMulti := map[string]string{
+		"Index":        "[many]",
+		"V1":           "[many]",
+		"V2":           "[many]",
+		"Flags":        "1",
+		"Special":      "[many]",
+		"Tag":          "5",
+		"Right Sidedef": "0",
+		"Left Sidedef":  "[many]",
+	}
+	for _, p := range propsLMulti {
+		if expectedLMulti[p.Name] != p.Value {
+			t.Errorf("line multi prop %s mismatch: got %s, want %s", p.Name, p.Value, expectedLMulti[p.Name])
+		}
+	}
+
+	// 3. Sector inspector
+	ed.SetEditMode(EditModeSector)
+	propsSMulti := ed.InspectorProperties([]int{0, 1})
+	expectedSMulti := map[string]string{
+		"Index":          "[many]",
+		"Floor Height":   "[many]",
+		"Ceiling Height": "128",
+		"Floor Pic":      "FLOOR0_1",
+		"Ceiling Pic":    "[many]",
+		"Light Level":    "160",
+		"Special":        "0",
+		"Tag":            "5",
+	}
+	for _, p := range propsSMulti {
+		if expectedSMulti[p.Name] != p.Value {
+			t.Errorf("sector multi prop %s mismatch: got %s, want %s", p.Name, p.Value, expectedSMulti[p.Name])
+		}
+	}
+
+	// 4. Thing inspector
+	ed.SetEditMode(EditModeThing)
+	propsTMulti := ed.InspectorProperties([]int{0, 1})
+	expectedTMulti := map[string]string{
+		"Index": "[many]",
+		"Type":  "1",
+		"Name":  "Player 1 Start",
+		"X":     "[many]",
+		"Y":     "200",
+		"Angle": "90",
+		"Flags": "7",
+	}
+	for _, p := range propsTMulti {
+		if expectedTMulti[p.Name] != p.Value {
+			t.Errorf("thing multi prop %s mismatch: got %s, want %s", p.Name, p.Value, expectedTMulti[p.Name])
+		}
+	}
+}
+
+func TestEditorRenderingSelectedAndHovered(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
+	}
+
+	ed := NewEditorMode(cf, nil)
+	mockMap := &wad.MapData{
+		Name: "TESTMAP",
+		Vertexes: []wad.Vertex{
+			{X: -64, Y: -64},
+			{X: 64, Y: -64},
+			{X: 64, Y: 64},
+			{X: -64, Y: 64},
+		},
+		Linedefs: []wad.Linedef{
+			{V1: 0, V2: 1, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 1, V2: 2, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 2, V2: 3, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 3, V2: 0, RightSide: 0, LeftSide: 0xFFFF},
+		},
+		Sidedefs: []wad.Sidedef{
+			{Sector: 0},
+		},
+		Sectors: []wad.Sector{
+			{FloorHeight: 0, CeilingHeight: 128},
+		},
+		Things: []wad.Thing{
+			{X: 0, Y: 0, Type: 1},
+		},
+	}
+	ed.SetMapData(mockMap)
+	ed.SetCamPosition(0, 0)
+	ed.SetZoomLevel(6)
+
+	screen := ebiten.NewImage(1280, 800)
+
+	// 1. Vertex Mode: Select vertex 0, Hover vertex 1
+	ed.SetEditMode(EditModeVertex)
+	ed.SelectVertex(0, false)
+	ed.hoveredVertex = 1
+	ed.Draw(screen)
+
+	// Vertex 0 hovered AND selected -> should remain selected (yellow)
+	ed.hoveredVertex = 0
+	ed.Draw(screen)
+
+	// 2. Line Mode: Select line 0, Hover line 1
+	ed.SetEditMode(EditModeLine)
+	ed.SelectLine(0, false)
+	ed.hoveredLinedef = 1
+	ed.Draw(screen)
+
+	// Line 0 hovered AND selected
+	ed.hoveredLinedef = 0
+	ed.Draw(screen)
+
+	// 3. Sector Mode: Select sector 0
+	ed.SetEditMode(EditModeSector)
+	ed.SelectSector(0, false)
+	ed.hoveredSector = -1
+	ed.Draw(screen)
+
+	// 4. Thing Mode: Select thing 0
+	ed.SetEditMode(EditModeThing)
+	ed.SelectThing(0, false)
+	ed.hoveredThing = 0
+	ed.Draw(screen)
+}
+

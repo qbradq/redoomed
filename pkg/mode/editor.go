@@ -148,6 +148,12 @@ type EditorMode struct {
 	zoomLevel int
 	editMode  EditMode
 
+	// Selection sets per mode
+	selectedVertexes map[int]bool
+	selectedLines    map[int]bool
+	selectedSectors  map[int]bool
+	selectedThings   map[int]bool
+
 	// Hovered target indices (-1 if none)
 	hoveredVertex  int
 	hoveredLinedef int
@@ -178,19 +184,23 @@ func NewEditorMode(f *font.ConsoleFont, w *wad.WAD) *EditorMode {
 	icons, _ := loadEditorIcons()
 
 	ed := &EditorMode{
-		buffer:         ebiten.NewImage(EditorBufferWidth, EditorBufferHeight),
-		wadFile:        w,
-		font:           f,
-		iconsImage:     icons,
-		gridSize:       DefaultGridSize,
-		zoomLevel:      DefaultZoomLevel,
-		editMode:       EditModeVertex,
-		hoveredVertex:  -1,
-		hoveredLinedef: -1,
-		hoveredSector:  -1,
-		hoveredThing:   -1,
-		camX:           0,
-		camY:           0,
+		buffer:           ebiten.NewImage(EditorBufferWidth, EditorBufferHeight),
+		wadFile:          w,
+		font:             f,
+		iconsImage:       icons,
+		gridSize:         DefaultGridSize,
+		zoomLevel:        DefaultZoomLevel,
+		editMode:         EditModeVertex,
+		selectedVertexes: make(map[int]bool),
+		selectedLines:    make(map[int]bool),
+		selectedSectors:  make(map[int]bool),
+		selectedThings:   make(map[int]bool),
+		hoveredVertex:    -1,
+		hoveredLinedef:   -1,
+		hoveredSector:    -1,
+		hoveredThing:     -1,
+		camX:             0,
+		camY:             0,
 	}
 
 	ed.initButtons()
@@ -373,6 +383,248 @@ func (e *EditorMode) HoveredSector() int {
 // HoveredThing returns the index of the thing currently hovered in thing mode (-1 if none).
 func (e *EditorMode) HoveredThing() int {
 	return e.hoveredThing
+}
+
+// SelectedVertexes returns a slice of currently selected vertex indices.
+func (e *EditorMode) SelectedVertexes() []int {
+	var res []int
+	for i := range e.selectedVertexes {
+		res = append(res, i)
+	}
+	return res
+}
+
+// SelectedLines returns a slice of currently selected linedef indices.
+func (e *EditorMode) SelectedLines() []int {
+	var res []int
+	for i := range e.selectedLines {
+		res = append(res, i)
+	}
+	return res
+}
+
+// SelectedSectors returns a slice of currently selected sector indices.
+func (e *EditorMode) SelectedSectors() []int {
+	var res []int
+	for i := range e.selectedSectors {
+		res = append(res, i)
+	}
+	return res
+}
+
+// SelectedThings returns a slice of currently selected thing indices.
+func (e *EditorMode) SelectedThings() []int {
+	var res []int
+	for i := range e.selectedThings {
+		res = append(res, i)
+	}
+	return res
+}
+
+// IsVertexSelected reports whether the given vertex index is selected.
+func (e *EditorMode) IsVertexSelected(i int) bool {
+	return e.selectedVertexes[i]
+}
+
+// IsLineSelected reports whether the given linedef index is selected.
+func (e *EditorMode) IsLineSelected(i int) bool {
+	return e.selectedLines[i]
+}
+
+// IsSectorSelected reports whether the given sector index is selected.
+func (e *EditorMode) IsSectorSelected(i int) bool {
+	return e.selectedSectors[i]
+}
+
+// IsThingSelected reports whether the given thing index is selected.
+func (e *EditorMode) IsThingSelected(i int) bool {
+	return e.selectedThings[i]
+}
+
+// SelectVertex selects or toggles a vertex in the selection set.
+func (e *EditorMode) SelectVertex(i int, multi bool) {
+	if multi {
+		if e.selectedVertexes[i] {
+			delete(e.selectedVertexes, i)
+		} else {
+			e.selectedVertexes[i] = true
+		}
+	} else {
+		e.selectedVertexes = map[int]bool{i: true}
+	}
+}
+
+// SelectLine selects or toggles a linedef in the selection set.
+func (e *EditorMode) SelectLine(i int, multi bool) {
+	if multi {
+		if e.selectedLines[i] {
+			delete(e.selectedLines, i)
+		} else {
+			e.selectedLines[i] = true
+		}
+	} else {
+		e.selectedLines = map[int]bool{i: true}
+	}
+}
+
+// SelectSector selects or toggles a sector in the selection set.
+func (e *EditorMode) SelectSector(i int, multi bool) {
+	if multi {
+		if e.selectedSectors[i] {
+			delete(e.selectedSectors, i)
+		} else {
+			e.selectedSectors[i] = true
+		}
+	} else {
+		e.selectedSectors = map[int]bool{i: true}
+	}
+}
+
+// SelectThing selects or toggles a thing in the selection set.
+func (e *EditorMode) SelectThing(i int, multi bool) {
+	if multi {
+		if e.selectedThings[i] {
+			delete(e.selectedThings, i)
+		} else {
+			e.selectedThings[i] = true
+		}
+	} else {
+		e.selectedThings = map[int]bool{i: true}
+	}
+}
+
+// ClearSelection clears the selection set for the current editing mode.
+func (e *EditorMode) ClearSelection() {
+	switch e.editMode {
+	case EditModeVertex:
+		e.selectedVertexes = make(map[int]bool)
+	case EditModeLine:
+		e.selectedLines = make(map[int]bool)
+	case EditModeSector:
+		e.selectedSectors = make(map[int]bool)
+	case EditModeThing:
+		e.selectedThings = make(map[int]bool)
+	}
+}
+
+// ActiveSelection returns a slice of currently selected element indices for the active mode.
+func (e *EditorMode) ActiveSelection() []int {
+	switch e.editMode {
+	case EditModeVertex:
+		return e.SelectedVertexes()
+	case EditModeLine:
+		return e.SelectedLines()
+	case EditModeSector:
+		return e.SelectedSectors()
+	case EditModeThing:
+		return e.SelectedThings()
+	default:
+		return nil
+	}
+}
+
+// SelectionCount returns the number of selected items in the active editing mode.
+func (e *EditorMode) SelectionCount() int {
+	return len(e.ActiveSelection())
+}
+
+// LookupThingName returns a human-readable name for a given Doom Thing type.
+func LookupThingName(thingType int16) string {
+	if def, ok := wad.LookupItemDef(thingType); ok && def.Name != "" {
+		return def.Name
+	}
+	switch thingType {
+	case 1:
+		return "Player 1 Start"
+	case 2:
+		return "Player 2 Start"
+	case 3:
+		return "Player 3 Start"
+	case 4:
+		return "Player 4 Start"
+	case 11:
+		return "Deathmatch Start"
+	case 14:
+		return "Teleport Destination"
+	case 3004:
+		return "Zombieman"
+	case 9:
+		return "Shotgun Guy"
+	case 65:
+		return "Chaingunner"
+	case 3001:
+		return "Imp"
+	case 3002:
+		return "Demon"
+	case 58:
+		return "Spectre"
+	case 3006:
+		return "Lost Soul"
+	case 3005:
+		return "Cacodemon"
+	case 3003:
+		return "Baron of Hell"
+	case 69:
+		return "Hell Knight"
+	case 16:
+		return "Cyberdemon"
+	case 7:
+		return "Spider Mastermind"
+	case 64:
+		return "Arch-Vile"
+	case 66:
+		return "Revenant"
+	case 67:
+		return "Mancubus"
+	case 68:
+		return "Arachnotron"
+	case 84:
+		return "Wolfenstein SS"
+	case 88:
+		return "Boss Brain"
+	case 2035:
+		return "Explosive Barrel"
+	case 70:
+		return "Burning Barrel"
+	case 34:
+		return "Candle"
+	case 35:
+		return "Candelabra"
+	case 44:
+		return "Tall Blue Torch"
+	case 45:
+		return "Tall Green Torch"
+	case 46:
+		return "Tall Red Torch"
+	case 55:
+		return "Short Blue Torch"
+	case 56:
+		return "Short Green Torch"
+	case 57:
+		return "Short Red Torch"
+	case 47:
+		return "Stump"
+	case 43:
+		return "Burnt Tree"
+	case 54:
+		return "Tall Tree"
+	case 48:
+		return "Tech Column"
+	case 30:
+		return "Tall Green Pillar"
+	case 32:
+		return "Tall Red Pillar"
+	case 31:
+		return "Short Green Pillar"
+	case 33:
+		return "Short Red Pillar"
+	case 85:
+		return "Tall Tech Lamp"
+	case 86:
+		return "Short Tech Lamp"
+	default:
+		return fmt.Sprintf("Thing %d", thingType)
+	}
 }
 
 // GetThingRadius returns the collision/bounding radius of a Doom thing in map units.
@@ -699,6 +951,11 @@ func (e *EditorMode) Update() error {
 		return nil
 	}
 
+	// Escape clears selection
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		e.ClearSelection()
+	}
+
 	// Grid size adjustment with [ and ]
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
 		e.DecreaseGridSize()
@@ -795,9 +1052,40 @@ func (e *EditorMode) Update() error {
 		e.CenterOnMap()
 	}
 
-	// Update button hover states and handle click events
+	// Left-click handling: button toolbar and map element selection
 	leftClick := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft)
 
+	// Selection interaction in editing grid window
+	if leftClick && mx >= 0 && mx < EditingWindowWidth && my >= 0 && my < EditingWindowHeight {
+		switch e.editMode {
+		case EditModeVertex:
+			if e.hoveredVertex >= 0 {
+				e.SelectVertex(e.hoveredVertex, ctrlPressed)
+			} else {
+				e.ClearSelection()
+			}
+		case EditModeLine:
+			if e.hoveredLinedef >= 0 {
+				e.SelectLine(e.hoveredLinedef, ctrlPressed)
+			} else {
+				e.ClearSelection()
+			}
+		case EditModeSector:
+			if e.hoveredSector >= 0 {
+				e.SelectSector(e.hoveredSector, ctrlPressed)
+			} else {
+				e.ClearSelection()
+			}
+		case EditModeThing:
+			if e.hoveredThing >= 0 {
+				e.SelectThing(e.hoveredThing, ctrlPressed)
+			} else {
+				e.ClearSelection()
+			}
+		}
+	}
+
+	// Update button hover states and handle click events
 	for i := 0; i < NumIconButtons; i++ {
 		if !e.buttons[i].Visible {
 			e.buttons[i].Hovered = false
@@ -899,7 +1187,7 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 			e.CenterOnMap()
 		}
 
-		// 2a. Draw linedefs (1px-wide lines, highlighted in lime green when hovered or sector selected)
+		// 2a. Draw linedefs (1px-wide lines, selected in yellow, hovered in green)
 		for i, ld := range md.Linedefs {
 			if int(ld.V1) < len(md.Vertexes) && int(ld.V2) < len(md.Vertexes) {
 				v1 := md.Vertexes[ld.V1]
@@ -908,17 +1196,36 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 				x2, y2 := e.WorldToScreen(float64(v2.X), float64(v2.Y))
 
 				lineColor := gfx.EGABrightWhite
-				if e.editMode == EditModeLine && e.hoveredLinedef == i {
-					lineColor = gfx.EGABrightGreen
-				} else if e.editMode == EditModeSector && e.hoveredSector >= 0 {
-					isSectorLine := false
-					if ld.RightSide != 0xFFFF && int(ld.RightSide) < len(md.Sidedefs) && int(md.Sidedefs[ld.RightSide].Sector) == e.hoveredSector {
-						isSectorLine = true
+				if e.editMode == EditModeLine {
+					if e.selectedLines[i] {
+						lineColor = gfx.EGABrightYellow
+					} else if e.hoveredLinedef == i {
+						lineColor = gfx.EGABrightGreen
 					}
-					if ld.LeftSide != 0xFFFF && int(ld.LeftSide) < len(md.Sidedefs) && int(md.Sidedefs[ld.LeftSide].Sector) == e.hoveredSector {
-						isSectorLine = true
+				} else if e.editMode == EditModeSector {
+					isHoveredSectorLine := false
+					isSelectedSectorLine := false
+					if ld.RightSide != 0xFFFF && int(ld.RightSide) < len(md.Sidedefs) {
+						sec := int(md.Sidedefs[ld.RightSide].Sector)
+						if e.selectedSectors[sec] {
+							isSelectedSectorLine = true
+						}
+						if sec == e.hoveredSector {
+							isHoveredSectorLine = true
+						}
 					}
-					if isSectorLine {
+					if ld.LeftSide != 0xFFFF && int(ld.LeftSide) < len(md.Sidedefs) {
+						sec := int(md.Sidedefs[ld.LeftSide].Sector)
+						if e.selectedSectors[sec] {
+							isSelectedSectorLine = true
+						}
+						if sec == e.hoveredSector {
+							isHoveredSectorLine = true
+						}
+					}
+					if isSelectedSectorLine {
+						lineColor = gfx.EGABrightYellow
+					} else if isHoveredSectorLine {
 						lineColor = gfx.EGABrightGreen
 					}
 				}
@@ -927,7 +1234,7 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 			}
 		}
 
-		// 2b. Draw Things as EGA Bright Cyan squares with crosses through them (the size of the entity)
+		// 2b. Draw Things as squares with crosses through them (selected in yellow, hovered in green, normal cyan)
 		for i, t := range md.Things {
 			tx, ty := e.WorldToScreen(float64(t.X), float64(t.Y))
 			radius := GetThingRadius(t.Type)
@@ -945,8 +1252,12 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 			}
 
 			thingColor := gfx.EGABrightCyan
-			if e.editMode == EditModeThing && e.hoveredThing == i {
-				thingColor = gfx.EGABrightGreen
+			if e.editMode == EditModeThing {
+				if e.selectedThings[i] {
+					thingColor = gfx.EGABrightYellow
+				} else if e.hoveredThing == i {
+					thingColor = gfx.EGABrightGreen
+				}
 			}
 
 			left := float32(tx - halfBox)
@@ -962,7 +1273,7 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 			vector.StrokeLine(dst, left+w, top, left, top+h, 1.0, thingColor, true)
 		}
 
-		// 2c. Draw vertices as chunky squares (4x4, highlighted in lime green when hovered)
+		// 2c. Draw vertices as chunky squares (4x4, selected in yellow, hovered in green, normal white)
 		const vertexSize = 4.0
 		const halfVertex = vertexSize / 2.0
 		for i, v := range md.Vertexes {
@@ -970,8 +1281,12 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 			if vx >= -10 && vx <= float64(EditingWindowWidth)+10 &&
 				vy >= -10 && vy <= float64(EditingWindowHeight)+10 {
 				vColor := gfx.EGABrightWhite
-				if e.editMode == EditModeVertex && e.hoveredVertex == i {
-					vColor = gfx.EGABrightGreen
+				if e.editMode == EditModeVertex {
+					if e.selectedVertexes[i] {
+						vColor = gfx.EGABrightYellow
+					} else if e.hoveredVertex == i {
+						vColor = gfx.EGABrightGreen
+					}
 				}
 				vector.DrawFilledRect(dst, float32(vx)-halfVertex, float32(vy)-halfVertex, vertexSize, vertexSize, vColor, false)
 			}
@@ -979,7 +1294,117 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 	}
 }
 
-// drawUserPanel renders the 240x392 dark gray panel with 16x16 icon buttons at the top.
+// PropertyPair represents a name-value inspector property.
+type PropertyPair struct {
+	Name  string
+	Value string
+}
+
+// InspectorProperties calculates the list of inspector properties for the given element indices.
+func (e *EditorMode) InspectorProperties(indices []int) []PropertyPair {
+	md := e.MapData()
+	if md == nil || len(indices) == 0 {
+		return nil
+	}
+
+	getPropsForIndex := func(idx int) []PropertyPair {
+		switch e.editMode {
+		case EditModeVertex:
+			if idx < 0 || idx >= len(md.Vertexes) {
+				return nil
+			}
+			v := md.Vertexes[idx]
+			return []PropertyPair{
+				{Name: "Index", Value: fmt.Sprintf("%d", idx)},
+				{Name: "X", Value: fmt.Sprintf("%d", v.X)},
+				{Name: "Y", Value: fmt.Sprintf("%d", v.Y)},
+			}
+		case EditModeLine:
+			if idx < 0 || idx >= len(md.Linedefs) {
+				return nil
+			}
+			ld := md.Linedefs[idx]
+			rSide := "None"
+			if ld.RightSide != 0xFFFF {
+				rSide = fmt.Sprintf("%d", ld.RightSide)
+			}
+			lSide := "None"
+			if ld.LeftSide != 0xFFFF {
+				lSide = fmt.Sprintf("%d", ld.LeftSide)
+			}
+			return []PropertyPair{
+				{Name: "Index", Value: fmt.Sprintf("%d", idx)},
+				{Name: "V1", Value: fmt.Sprintf("%d", ld.V1)},
+				{Name: "V2", Value: fmt.Sprintf("%d", ld.V2)},
+				{Name: "Flags", Value: fmt.Sprintf("%d", ld.Flags)},
+				{Name: "Special", Value: fmt.Sprintf("%d", ld.Special)},
+				{Name: "Tag", Value: fmt.Sprintf("%d", ld.Tag)},
+				{Name: "Right Sidedef", Value: rSide},
+				{Name: "Left Sidedef", Value: lSide},
+			}
+		case EditModeSector:
+			if idx < 0 || idx >= len(md.Sectors) {
+				return nil
+			}
+			sec := md.Sectors[idx]
+			return []PropertyPair{
+				{Name: "Index", Value: fmt.Sprintf("%d", idx)},
+				{Name: "Floor Height", Value: fmt.Sprintf("%d", sec.FloorHeight)},
+				{Name: "Ceiling Height", Value: fmt.Sprintf("%d", sec.CeilingHeight)},
+				{Name: "Floor Pic", Value: sec.FloorPic},
+				{Name: "Ceiling Pic", Value: sec.CeilingPic},
+				{Name: "Light Level", Value: fmt.Sprintf("%d", sec.LightLevel)},
+				{Name: "Special", Value: fmt.Sprintf("%d", sec.Special)},
+				{Name: "Tag", Value: fmt.Sprintf("%d", sec.Tag)},
+			}
+		case EditModeThing:
+			if idx < 0 || idx >= len(md.Things) {
+				return nil
+			}
+			th := md.Things[idx]
+			return []PropertyPair{
+				{Name: "Index", Value: fmt.Sprintf("%d", idx)},
+				{Name: "Type", Value: fmt.Sprintf("%d", th.Type)},
+				{Name: "Name", Value: LookupThingName(th.Type)},
+				{Name: "X", Value: fmt.Sprintf("%d", th.X)},
+				{Name: "Y", Value: fmt.Sprintf("%d", th.Y)},
+				{Name: "Angle", Value: fmt.Sprintf("%d", th.Angle)},
+				{Name: "Flags", Value: fmt.Sprintf("%d", th.Flags)},
+			}
+		default:
+			return nil
+		}
+	}
+
+	base := getPropsForIndex(indices[0])
+	if len(base) == 0 {
+		return nil
+	}
+
+	if len(indices) == 1 {
+		return base
+	}
+
+	// Multi-selection comparison
+	result := make([]PropertyPair, len(base))
+	copy(result, base)
+
+	for _, idx := range indices[1:] {
+		other := getPropsForIndex(idx)
+		if len(other) != len(result) {
+			continue
+		}
+		for i := range result {
+			if result[i].Value != "[many]" && result[i].Value != other[i].Value {
+				result[i].Value = "[many]"
+			}
+		}
+	}
+
+	return result
+}
+
+// drawUserPanel renders the 240x392 dark gray panel with 16x16 icon buttons at the top and inspector properties below.
 func (e *EditorMode) drawUserPanel(dst *ebiten.Image) {
 	// Fill user panel background with dark gray
 	vector.DrawFilledRect(dst, UserPanelX, UserPanelY, UserPanelWidth, UserPanelHeight, gfx.EGADarkGray, false)
@@ -1034,6 +1459,53 @@ func (e *EditorMode) drawUserPanel(dst *ebiten.Image) {
 			}
 
 			dst.DrawImage(sub, op)
+		}
+	}
+
+	// Draw property inspector below buttons
+	if e.font != nil {
+		var targetIndices []int
+		activeSel := e.ActiveSelection()
+		if len(activeSel) > 0 {
+			targetIndices = activeSel
+		} else {
+			var hovered int
+			switch e.editMode {
+			case EditModeVertex:
+				hovered = e.hoveredVertex
+			case EditModeLine:
+				hovered = e.hoveredLinedef
+			case EditModeSector:
+				hovered = e.hoveredSector
+			case EditModeThing:
+				hovered = e.hoveredThing
+			}
+			if hovered >= 0 {
+				targetIndices = []int{hovered}
+			}
+		}
+
+		if len(targetIndices) > 0 {
+			props := e.InspectorProperties(targetIndices)
+			leftX := UserPanelX + 8
+			rightX := UserPanelX + UserPanelWidth - 8
+			y := 28
+			const lineHeight = 12
+
+			for _, p := range props {
+				// Align names of things to the left, use black
+				e.font.DrawText(dst, p.Name, leftX, y, gfx.EGABlack)
+
+				// Align values to the right, use black
+				valWidth, _ := e.font.MeasureText(p.Value)
+				valX := rightX - valWidth
+				if valX < leftX {
+					valX = leftX
+				}
+				e.font.DrawText(dst, p.Value, valX, y, gfx.EGABlack)
+
+				y += lineHeight
+			}
 		}
 	}
 }
