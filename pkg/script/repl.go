@@ -19,10 +19,14 @@ type REPL struct {
 	modules     *tengo.ModuleMap
 	symbolTable *tengo.SymbolTable
 	globals     []tengo.Object
-	resIndex    int
-	onExit      func()
-	onStartMap  func(string)
-	printFunc   func(string)
+	resIndex          int
+	onExit            func()
+	onStartMap        func(string)
+	onPlayMusic       func(string)
+	onStopMusic       func()
+	onSetMusicVolume  func(float64)
+	onGetMusicTrack   func() string
+	printFunc         func(string)
 }
 
 // NewREPL creates a new Tengo REPL environment.
@@ -57,6 +61,65 @@ func NewREPL(onExit func(), printFunc func(string)) *REPL {
 		},
 	}
 
+	playMusicFunc := &tengo.UserFunction{
+		Name: "PlayMusic",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			if len(args) == 0 {
+				return nil, fmt.Errorf("PlayMusic: missing music_name argument")
+			}
+			trackStr, ok := args[0].(*tengo.String)
+			if !ok {
+				return nil, fmt.Errorf("PlayMusic: expected string for music_name, found %s", args[0].TypeName())
+			}
+			if r.onPlayMusic != nil {
+				r.onPlayMusic(trackStr.Value)
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
+
+	stopMusicFunc := &tengo.UserFunction{
+		Name: "StopMusic",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			if r.onStopMusic != nil {
+				r.onStopMusic()
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
+
+	setVolumeFunc := &tengo.UserFunction{
+		Name: "SetMusicVolume",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			if len(args) == 0 {
+				return nil, fmt.Errorf("SetMusicVolume: missing volume argument")
+			}
+			var vol float64
+			if fVal, ok := args[0].(*tengo.Float); ok {
+				vol = fVal.Value
+			} else if iVal, ok := args[0].(*tengo.Int); ok {
+				vol = float64(iVal.Value)
+			} else {
+				return nil, fmt.Errorf("SetMusicVolume: expected number for volume, found %s", args[0].TypeName())
+			}
+			if r.onSetMusicVolume != nil {
+				r.onSetMusicVolume(vol)
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
+
+	getMusicFunc := &tengo.UserFunction{
+		Name: "GetMusicTrack",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			track := ""
+			if r.onGetMusicTrack != nil {
+				track = r.onGetMusicTrack()
+			}
+			return &tengo.String{Value: track}, nil
+		},
+	}
+
 	gameModule := map[string]tengo.Object{
 		"exit": &tengo.UserFunction{
 			Name: "exit",
@@ -67,8 +130,18 @@ func NewREPL(onExit func(), printFunc func(string)) *REPL {
 				return tengo.UndefinedValue, nil
 			},
 		},
-		"StartMap":  startMapFunc,
-		"start_map": startMapFunc,
+		"StartMap":         startMapFunc,
+		"start_map":        startMapFunc,
+		"PlayMusic":        playMusicFunc,
+		"play_music":       playMusicFunc,
+		"StopMusic":        stopMusicFunc,
+		"stop_music":       stopMusicFunc,
+		"SetMusicVolume":   setVolumeFunc,
+		"set_music_volume": setVolumeFunc,
+		"GetMusicTrack":    getMusicFunc,
+		"get_music_track":  getMusicFunc,
+		"GetMusic":         getMusicFunc,
+		"get_music":        getMusicFunc,
 	}
 
 	r.modules = stdlib.GetModuleMap(stdlib.AllModuleNames()...)
@@ -76,6 +149,34 @@ func NewREPL(onExit func(), printFunc func(string)) *REPL {
 	r.modules.AddBuiltinModule("fmt", r.createFmtModule())
 
 	return r
+}
+
+// SetPlayMusicFunc updates the music playback callback.
+func (r *REPL) SetPlayMusicFunc(fn func(string)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onPlayMusic = fn
+}
+
+// SetStopMusicFunc updates the music stop callback.
+func (r *REPL) SetStopMusicFunc(fn func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onStopMusic = fn
+}
+
+// SetSetMusicVolumeFunc updates the music volume callback.
+func (r *REPL) SetSetMusicVolumeFunc(fn func(float64)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onSetMusicVolume = fn
+}
+
+// SetGetMusicTrackFunc updates the get current music track callback.
+func (r *REPL) SetGetMusicTrackFunc(fn func() string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onGetMusicTrack = fn
 }
 
 // SetStartMapFunc updates the map start callback.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
+	"github.com/qbradq/redoomed/pkg/audio"
 	"github.com/qbradq/redoomed/pkg/data"
 	"github.com/qbradq/redoomed/pkg/font"
 	"github.com/qbradq/redoomed/pkg/gfx"
@@ -27,6 +28,7 @@ type App struct {
 	wadFile       *wad.WAD
 	hudFont       *wad.HUDFont
 	consoleFont   *font.ConsoleFont
+	musicMgr      *audio.MusicManager
 	consoleMode   *mode.ConsoleMode
 	gameMode      *mode.GameMode
 	currentMode   mode.Mode
@@ -73,6 +75,9 @@ func NewApp() *App {
 		log.Println("Warning: no IWAD found in standard search paths")
 	}
 
+	// Initialize background music manager with loaded WAD
+	app.musicMgr = audio.NewMusicManager(app.wadFile)
+
 	// Initialize with Quake-style console mode using the 8x8 unscii font
 	app.consoleMode = mode.NewConsoleMode(app.consoleFont)
 	app.consoleMode.SetOnClose(func() {
@@ -84,12 +89,26 @@ func NewApp() *App {
 		app.ToggleConsole()
 	})
 
-	// Initialize Tengo REPL with exit and start_map handlers
+	// Initialize Tengo REPL with exit, start_map, and music handlers
 	repl := script.NewREPL(func() {
 		app.exitRequested = true
 	}, nil)
 	repl.SetStartMapFunc(func(mapName string) {
 		app.StartMap(mapName)
+	})
+	repl.SetPlayMusicFunc(func(track string) {
+		if err := app.musicMgr.PlayMusic(track); err != nil {
+			log.Printf("Error playing music track %s: %v", track, err)
+		}
+	})
+	repl.SetStopMusicFunc(func() {
+		app.musicMgr.Stop()
+	})
+	repl.SetSetMusicVolumeFunc(func(v float64) {
+		app.musicMgr.SetVolume(v)
+	})
+	repl.SetGetMusicTrackFunc(func() string {
+		return app.musicMgr.CurrentTrack()
 	})
 
 	app.consoleMode.SetREPL(repl)
@@ -125,7 +144,7 @@ func (a *App) ToggleConsole() {
 	}
 }
 
-// StartMap enters the game mode for the given map name and hides the console.
+// StartMap enters the game mode for the given map name, starts map music, and hides the console.
 func (a *App) StartMap(mapName string) {
 	if a.gameMode == nil {
 		a.gameMode = mode.NewGameMode(mapName, a.wadFile, func() {
@@ -134,7 +153,19 @@ func (a *App) StartMap(mapName string) {
 	} else {
 		a.gameMode.SetMapName(mapName)
 	}
+
+	if a.musicMgr != nil && mapName != "" {
+		if err := a.musicMgr.PlayMapMusic(mapName); err != nil {
+			log.Printf("Warning: failed to play music for %s: %v", mapName, err)
+		}
+	}
+
 	a.SetMode(a.gameMode)
+}
+
+// MusicManager returns the active MusicManager instance.
+func (a *App) MusicManager() *audio.MusicManager {
+	return a.musicMgr
 }
 
 // GameMode returns the active GameMode, or nil if not initialized.

@@ -108,9 +108,20 @@ func TestAppExitCommand(t *testing.T) {
 	}
 
 	// Update() should now return ebiten.Termination
-	err = app.Update()
-	if !errors.Is(err, ebiten.Termination) {
-		t.Errorf("expected Update() to return ebiten.Termination, got: %v", err)
+	if err := app.Update(); !errors.Is(err, ebiten.Termination) {
+		t.Errorf("expected ebiten.Termination after exit, got %v", err)
+	}
+}
+
+func TestAppMusicManager(t *testing.T) {
+	app := NewApp()
+	if app.MusicManager() == nil {
+		t.Fatal("expected non-nil MusicManager from App")
+	}
+
+	// Should have default volume 0.7
+	if app.MusicManager().Volume() != 0.7 {
+		t.Errorf("expected default volume 0.7, got %f", app.MusicManager().Volume())
 	}
 }
 

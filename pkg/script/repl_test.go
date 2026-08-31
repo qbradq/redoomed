@@ -53,6 +53,72 @@ func TestGameExit(t *testing.T) {
 	}
 }
 
+func TestAutoexecScript(t *testing.T) {
+	var printed []string
+	var startedMap string
+
+	repl := NewREPL(nil, func(s string) {
+		printed = append(printed, s)
+	})
+	repl.SetStartMapFunc(func(m string) {
+		startedMap = m
+	})
+
+	scriptCode := `
+fmt := import("fmt")
+game := import("game")
+
+fmt.println("Welcome to ReDoomEd!")
+game.StartMap("MAP01")
+`
+	_, err := repl.EvalScript("autoexec.tengo", scriptCode)
+	if err != nil {
+		t.Fatalf("EvalScript failed: %v", err)
+	}
+
+	if startedMap != "MAP01" {
+		t.Errorf("expected autoexec to start MAP01, got %s", startedMap)
+	}
+
+	if len(printed) == 0 {
+		t.Error("expected printed output from autoexec")
+	}
+}
+
+func TestGameMusicBindings(t *testing.T) {
+	var playedMusic string
+	var stopped bool
+	var setVol float64
+	currentTrack := "D_RUNNIN"
+
+	repl := NewREPL(nil, nil)
+	repl.SetPlayMusicFunc(func(m string) { playedMusic = m })
+	repl.SetStopMusicFunc(func() { stopped = true })
+	repl.SetSetMusicVolumeFunc(func(v float64) { setVol = v })
+	repl.SetGetMusicTrackFunc(func() string { return currentTrack })
+
+	_, err := repl.Eval(`
+game := import("game")
+game.PlayMusic("D_STALKS")
+game.SetMusicVolume(0.5)
+t := game.GetMusicTrack()
+game.StopMusic()
+`)
+	if err != nil {
+		t.Fatalf("Eval failed: %v", err)
+	}
+
+	if playedMusic != "D_STALKS" {
+		t.Errorf("expected played music D_STALKS, got %q", playedMusic)
+	}
+	if setVol != 0.5 {
+		t.Errorf("expected set volume 0.5, got %f", setVol)
+	}
+	if !stopped {
+		t.Error("expected StopMusic to be called")
+	}
+}
+
 func TestStartMap(t *testing.T) {
 	var loadedMap string
 	repl := NewREPL(nil, nil)
