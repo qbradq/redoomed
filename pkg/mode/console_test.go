@@ -22,6 +22,23 @@ func TestConsoleModeBasics(t *testing.T) {
 	}
 }
 
+func TestConsoleModeBGColor(t *testing.T) {
+	cm := NewConsoleMode(nil)
+	bg := cm.BGColor()
+	// Background should be 85% alpha black (A = 217)
+	if bg.R != 0 || bg.G != 0 || bg.B != 0 {
+		t.Errorf("expected black RGB (0, 0, 0), got (%d, %d, %d)", bg.R, bg.G, bg.B)
+	}
+	if bg.A != 217 {
+		t.Errorf("expected 85%% alpha (A=217), got A=%d", bg.A)
+	}
+
+	cm.SetBGColor(color.RGBA{R: 10, G: 20, B: 30, A: 128})
+	if cm.BGColor() != (color.RGBA{R: 10, G: 20, B: 30, A: 128}) {
+		t.Errorf("SetBGColor failed: got %+v", cm.BGColor())
+	}
+}
+
 func TestConsoleModeHistoryCap(t *testing.T) {
 	cm := NewConsoleMode(nil)
 

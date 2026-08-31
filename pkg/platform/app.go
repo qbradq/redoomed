@@ -176,13 +176,22 @@ func NewAppWithIWAD(iwadPath string) *App {
 	return app
 }
 
-// ToggleConsole toggles between ConsoleMode and GameMode (or the previous mode).
+// underlyingMode returns the mode that should be rendered beneath ConsoleMode.
+func (a *App) underlyingMode() mode.Mode {
+	if a.previousMode != nil && a.previousMode != a.consoleMode {
+		return a.previousMode
+	}
+	if a.gameMode != nil {
+		return a.gameMode
+	}
+	return nil
+}
+
+// ToggleConsole toggles between ConsoleMode and the underlying mode (GameMode, EditorMode, etc.).
 func (a *App) ToggleConsole() {
 	if a.currentMode == a.consoleMode {
-		if a.previousMode != nil {
-			a.currentMode = a.previousMode
-		} else if a.gameMode != nil {
-			a.currentMode = a.gameMode
+		if underlying := a.underlyingMode(); underlying != nil {
+			a.currentMode = underlying
 		}
 	} else {
 		a.previousMode = a.currentMode
@@ -224,10 +233,18 @@ func (a *App) ConsoleMode() *mode.ConsoleMode {
 	return a.consoleMode
 }
 
+// PreviousMode returns the previously active application mode, or nil if none.
+func (a *App) PreviousMode() mode.Mode {
+	return a.previousMode
+}
+
 // SetMode switches the active top-level application mode.
 func (a *App) SetMode(m mode.Mode) {
 	if m == nil {
 		panic("cannot set nil application mode")
+	}
+	if a.currentMode != a.consoleMode && a.currentMode != m {
+		a.previousMode = a.currentMode
 	}
 	a.currentMode = m
 }
@@ -264,7 +281,16 @@ func (a *App) Update() error {
 }
 
 // Draw renders the active mode onto the screen.
+// If ConsoleMode is active, the underlying mode (e.g. GameMode or EditorMode) is rendered beneath it.
 func (a *App) Draw(screen *ebiten.Image) {
+	if a.currentMode == a.consoleMode {
+		if underlying := a.underlyingMode(); underlying != nil {
+			underlying.Draw(screen)
+		}
+		a.consoleMode.Draw(screen)
+		return
+	}
+
 	if a.currentMode != nil {
 		a.currentMode.Draw(screen)
 		return

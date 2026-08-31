@@ -174,3 +174,95 @@ func TestNewAppWithIWAD(t *testing.T) {
 		t.Fatal("expected NewAppWithIWAD to handle missing file gracefully")
 	}
 }
+
+type mockMode struct {
+	updateCount int
+	drawCount   int
+}
+
+func (m *mockMode) Update() error {
+	m.updateCount++
+	return nil
+}
+
+func (m *mockMode) Draw(screen *ebiten.Image) {
+	m.drawCount++
+}
+
+func TestAppConsoleUnderlyingModeRendering(t *testing.T) {
+	app := NewApp()
+
+	// Initial mode after autoexec is GameMode
+	gameMode, ok := app.CurrentMode().(*mode.GameMode)
+	if !ok || gameMode == nil {
+		t.Fatalf("expected initial CurrentMode to be GameMode, got %T", app.CurrentMode())
+	}
+
+	// Toggle to Console
+	app.ToggleConsole()
+	if app.CurrentMode() != app.ConsoleMode() {
+		t.Fatalf("expected CurrentMode to be ConsoleMode, got %T", app.CurrentMode())
+	}
+
+	// Draw should composite gameMode under consoleMode without panicking
+	screen := ebiten.NewImage(ScreenWidth, ScreenHeight)
+	app.Draw(screen)
+
+	// In ConsoleMode, Update should only update console and not cause error
+	if err := app.Update(); err != nil {
+		t.Errorf("app.Update() error: %v", err)
+	}
+
+	// Toggle back to GameMode
+	app.ToggleConsole()
+	if app.CurrentMode() != gameMode {
+		t.Fatalf("expected mode after toggle back to be GameMode, got %T", app.CurrentMode())
+	}
+}
+
+func TestAppConsoleOverCustomMode(t *testing.T) {
+	app := NewApp()
+
+	mock := &mockMode{}
+	app.SetMode(mock)
+
+	if app.CurrentMode() != mock {
+		t.Fatalf("expected CurrentMode to be mockMode, got %T", app.CurrentMode())
+	}
+
+	// Toggle console on top of mock mode (simulating future editor mode)
+	app.ToggleConsole()
+	if app.CurrentMode() != app.ConsoleMode() {
+		t.Fatalf("expected CurrentMode to be ConsoleMode, got %T", app.CurrentMode())
+	}
+
+	// When Draw is called, mock mode Draw should be called once as the underlying layer
+	screen := ebiten.NewImage(ScreenWidth, ScreenHeight)
+	app.Draw(screen)
+	if mock.drawCount != 1 {
+		t.Errorf("expected mockMode.drawCount to be 1, got %d", mock.drawCount)
+	}
+
+	// When Update is called, mock mode Update should NOT be called (simulation frozen)
+	if err := app.Update(); err != nil {
+		t.Errorf("app.Update() error: %v", err)
+	}
+	if mock.updateCount != 0 {
+		t.Errorf("expected mockMode.updateCount to be 0 while console is open, got %d", mock.updateCount)
+	}
+
+	// Toggle console off should restore mock mode
+	app.ToggleConsole()
+	if app.CurrentMode() != mock {
+		t.Fatalf("expected CurrentMode restored to mockMode, got %T", app.CurrentMode())
+	}
+
+	// Now Update should advance mock mode
+	if err := app.Update(); err != nil {
+		t.Errorf("app.Update() error: %v", err)
+	}
+	if mock.updateCount != 1 {
+		t.Errorf("expected mockMode.updateCount to be 1 after console closed, got %d", mock.updateCount)
+	}
+}
+

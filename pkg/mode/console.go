@@ -81,12 +81,22 @@ func (c *ConsoleMode) REPL() *script.REPL {
 	return c.repl
 }
 
-// NewConsoleMode creates a new ConsoleMode instance with a black background and the 8x8 fixed-width font.
+// BGColor returns the console background color.
+func (c *ConsoleMode) BGColor() color.RGBA {
+	return c.bgColor
+}
+
+// SetBGColor sets the console background color.
+func (c *ConsoleMode) SetBGColor(clr color.RGBA) {
+	c.bgColor = clr
+}
+
+// NewConsoleMode creates a new ConsoleMode instance with an 85% alpha black background and the 8x8 fixed-width font.
 func NewConsoleMode(f *font.ConsoleFont) *ConsoleMode {
 	return &ConsoleMode{
 		buffer:        ebiten.NewImage(ConsoleBufferWidth, ConsoleBufferHeight),
 		font:          f,
-		bgColor:       color.RGBA{R: 0, G: 0, B: 0, A: 255}, // Black background
+		bgColor:       color.RGBA{R: 0, G: 0, B: 0, A: 217}, // 85% alpha black (255 * 0.85 = 216.75 ≈ 217)
 		cmdHistoryIdx: -1,
 	}
 }
