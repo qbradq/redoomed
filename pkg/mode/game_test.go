@@ -7,6 +7,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
+	"github.com/qbradq/redoomed/pkg/render"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
 
@@ -437,5 +438,60 @@ func TestGameModeTriggerLineSpecial(t *testing.T) {
 			triggeredSpecial, triggeredLine, triggeredTag)
 	}
 }
+
+func TestLevelViewLayerFloorUpdate(t *testing.T) {
+	mapData := &wad.MapData{
+		Vertexes: []wad.Vertex{
+			{X: -100, Y: -100},
+			{X: 100, Y: -100},
+			{X: 100, Y: 100},
+			{X: -100, Y: 100},
+		},
+		Sectors: []wad.Sector{
+			{FloorHeight: 0, CeilingHeight: 128},
+		},
+		Sidedefs: []wad.Sidedef{
+			{Sector: 0},
+		},
+		Linedefs: []wad.Linedef{
+			{V1: 0, V2: 1, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 1, V2: 2, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 2, V2: 3, RightSide: 0, LeftSide: 0xFFFF},
+			{V1: 3, V2: 0, RightSide: 0, LeftSide: 0xFFFF},
+		},
+		Segs: []wad.Seg{
+			{V1: 0, V2: 1, Linedef: 0, Direction: 0},
+		},
+		Subsectors: []wad.Subsector{
+			{NumSegs: 1, FirstSeg: 0},
+		},
+		Nodes: []wad.Node{},
+	}
+
+	layer := NewLevelViewLayer()
+	layer.SetMapData(mapData)
+	layer.SetVisible(true)
+	layer.SetCamera(0, 0, 41, 0)
+
+	if layer.Camera().Z != 41 {
+		t.Fatalf("expected initial camera Z 41, got %f", layer.Camera().Z)
+	}
+
+	// Change sector floor height (e.g. lift rises from 0 to 96)
+	mapData.Sectors[0].FloorHeight = 96
+
+	// Run Update()
+	_, _ = layer.Update()
+
+	// Verify player and camera Z adapted to new floor height
+	if layer.Player().FloorZ != 96 {
+		t.Errorf("expected player FloorZ 96, got %f", layer.Player().FloorZ)
+	}
+	expectedZ := 96.0 + render.DefaultPlayerEyeHeight
+	if layer.Camera().Z != expectedZ {
+		t.Errorf("expected camera Z %f, got %f", expectedZ, layer.Camera().Z)
+	}
+}
+
 
 

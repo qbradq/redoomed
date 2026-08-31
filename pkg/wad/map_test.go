@@ -301,3 +301,8 @@ func TestLoadMapFromWAD(t *testing.T) {
 		t.Errorf("invalid map bounds: (%d, %d) to (%d, %d)", minX, minY, maxX, maxY)
 	}
 }
+
+
+
+
+

@@ -1,0 +1,36 @@
+map := import("map")
+times := import("times")
+
+active_scrollers := {}
+
+// Line special 48: Scroll Texture Left (animated continuous wall scroll)
+line_special_048 := func(line_id, sec_id, thing_id, tag) {
+	key := string(line_id)
+	if active_scrollers[key] {
+		return
+	}
+	active_scrollers[key] = true
+
+	line := map.get_line(line_id)
+	if line == undefined || line.front_sidedef < 0 {
+		active_scrollers[key] = false
+		return
+	}
+
+	side_id := line.front_sidedef
+
+	// Continuously increment sidedef X offset (1 pixel per tic / ~35 Hz)
+	for {
+		side := map.get_sidedef(side_id)
+		if side == undefined {
+			break
+		}
+		new_offset := (side.x_offset + 1) % 65536
+		map.set_sidedef_x_offset(side_id, new_offset)
+		times.sleep(28 * times.millisecond)
+	}
+
+	active_scrollers[key] = false
+}
+
+export line_special_048

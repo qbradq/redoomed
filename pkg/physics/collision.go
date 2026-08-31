@@ -6,34 +6,30 @@ import (
 	"github.com/qbradq/redoomed/pkg/wad"
 )
 
-// CheckPosition tests whether the actor can legally stand at (targetX, targetY).
-// It verifies:
-// 1. Solid wall linedef collisions (1-sided and blocking 2-sided).
-// 2. Step up height (cannot step up higher than MaxStepHeight).
-// 3. Low ceiling clearance (cannot squeeze under ceilings lower than actor Height).
-// 4. Multi-sector bounding box sampling for floor and ceiling heights (preventing falling into small cracks).
-func CheckPosition(mapData *wad.MapData, actor *Actor, targetX, targetY float64) (valid bool, floorZ float64, ceilingZ float64) {
-	if mapData == nil {
-		return true, actor.FloorZ, actor.CeilingZ
+// SampleFloorCeiling calculates the highest floor and lowest ceiling within the actor's 2D bounding box at (x, y).
+// It samples 9 points across the actor bounding box and includes adjacent sectors from intersecting 2-sided linedefs.
+func SampleFloorCeiling(mapData *wad.MapData, actor *Actor, x, y float64) (floorZ, ceilingZ float64, ok bool) {
+	if mapData == nil || actor == nil {
+		return 0, 0, false
 	}
 
 	r := actor.Radius
-	boxMinX := targetX - r
-	boxMaxX := targetX + r
-	boxMinY := targetY - r
-	boxMaxY := targetY + r
+	boxMinX := x - r
+	boxMaxX := x + r
+	boxMinY := y - r
+	boxMaxY := y + r
 
 	// 1. Gather all sectors covered by the actor's 2D bounding box
 	samplePoints := [9][2]float64{
-		{targetX, targetY},         // Center
-		{boxMinX, boxMinY},         // Bottom-left
-		{boxMaxX, boxMinY},         // Bottom-right
-		{boxMinX, boxMaxY},         // Top-left
-		{boxMaxX, boxMaxY},         // Top-right
-		{boxMinX, targetY},         // Mid-left
-		{boxMaxX, targetY},         // Mid-right
-		{targetX, boxMinY},         // Mid-bottom
-		{targetX, boxMaxY},         // Mid-top
+		{x, y},             // Center
+		{boxMinX, boxMinY}, // Bottom-left
+		{boxMaxX, boxMinY}, // Bottom-right
+		{boxMinX, boxMaxY}, // Top-left
+		{boxMaxX, boxMaxY}, // Top-right
+		{boxMinX, y},       // Mid-left
+		{boxMaxX, y},       // Mid-right
+		{x, boxMinY},       // Mid-bottom
+		{x, boxMaxY},       // Mid-top
 	}
 
 	highestFloor := -math.MaxFloat64
@@ -41,7 +37,7 @@ func CheckPosition(mapData *wad.MapData, actor *Actor, targetX, targetY float64)
 	sectorFound := false
 
 	for _, pt := range samplePoints {
-		if sec, ok := mapData.SectorAt(pt[0], pt[1]); ok && sec != nil {
+		if sec, found := mapData.SectorAt(pt[0], pt[1]); found && sec != nil {
 			sectorFound = true
 			fh := float64(sec.FloorHeight)
 			ch := float64(sec.CeilingHeight)
@@ -93,15 +89,54 @@ func CheckPosition(mapData *wad.MapData, actor *Actor, targetX, targetY float64)
 	}
 
 	if !sectorFound {
+		return actor.FloorZ, actor.CeilingZ, false
+	}
+	return highestFloor, lowestCeiling, true
+}
+
+// UpdateActorFloor updates the actor's FloorZ, CeilingZ, and vertical Z based on current map sector heights at (actor.X, actor.Y).
+// This ensures that when elevators, lifts, or moving floors change while an actor stands still, the actor's vertical state stays in sync.
+func UpdateActorFloor(mapData *wad.MapData, actor *Actor) {
+	if mapData == nil || actor == nil {
+		return
+	}
+	if floorZ, ceilingZ, ok := SampleFloorCeiling(mapData, actor, actor.X, actor.Y); ok {
+		actor.FloorZ = floorZ
+		actor.CeilingZ = ceilingZ
+		actor.Z = floorZ + actor.EyeHeight
+	}
+}
+
+// CheckPosition tests whether the actor can legally stand at (targetX, targetY).
+// It verifies:
+// 1. Solid wall linedef collisions (1-sided and blocking 2-sided).
+// 2. Step up height (cannot step up higher than MaxStepHeight).
+// 3. Low ceiling clearance (cannot squeeze under ceilings lower than actor Height).
+// 4. Multi-sector bounding box sampling for floor and ceiling heights (preventing falling into small cracks).
+func CheckPosition(mapData *wad.MapData, actor *Actor, targetX, targetY float64) (valid bool, floorZ float64, ceilingZ float64) {
+	if mapData == nil {
+		return true, actor.FloorZ, actor.CeilingZ
+	}
+
+	// 1. Resync actor's current floor/ceiling state to handle moving sectors (lifts, crushers)
+	if curFloor, curCeil, ok := SampleFloorCeiling(mapData, actor, actor.X, actor.Y); ok {
+		actor.FloorZ = curFloor
+		actor.CeilingZ = curCeil
+		actor.Z = curFloor + actor.EyeHeight
+	}
+
+	// 2. Sample target location floor and ceiling
+	highestFloor, lowestCeiling, sectorFound := SampleFloorCeiling(mapData, actor, targetX, targetY)
+	if !sectorFound {
 		return false, actor.FloorZ, actor.CeilingZ
 	}
 
-	// 2. Prevent actor from stepping up too high
+	// 3. Prevent actor from stepping up too high
 	if highestFloor-actor.FloorZ > actor.MaxStepHeight {
 		return false, highestFloor, lowestCeiling
 	}
 
-	// 3. Prevent actor from squeezing under low ceilings
+	// 4. Prevent actor from squeezing under low ceilings
 	if lowestCeiling-highestFloor < actor.Height {
 		return false, highestFloor, lowestCeiling
 	}
@@ -109,7 +144,12 @@ func CheckPosition(mapData *wad.MapData, actor *Actor, targetX, targetY float64)
 		return false, highestFloor, lowestCeiling
 	}
 
-	// 4. Check collisions against all linedefs
+	// 5. Check collisions against all linedefs
+	r := actor.Radius
+	boxMinX := targetX - r
+	boxMaxX := targetX + r
+	boxMinY := targetY - r
+	boxMaxY := targetY + r
 	for i := range mapData.Linedefs {
 		ld := &mapData.Linedefs[i]
 		if int(ld.V1) >= len(mapData.Vertexes) || int(ld.V2) >= len(mapData.Vertexes) {

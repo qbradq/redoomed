@@ -1,0 +1,53 @@
+fmt := import("fmt")
+map := import("map")
+times := import("times")
+
+// active_sectors tracks sectors currently moving to prevent re-trigger conflicts
+active_sectors := {}
+
+lower_floor_turbo := func(sec_id) {
+	key := string(sec_id)
+	if active_sectors[key] {
+		return
+	}
+	active_sectors[key] = true
+
+	sec := map.get_sector(sec_id)
+	if sec == undefined {
+		active_sectors[key] = false
+		return
+	}
+
+	dest_floor := map.get_lowest_adjacent_floor(sec_id)
+
+	// Lower sector floor to dest_floor at turbo speed (4 units per tick)
+	for sec.floor_height > dest_floor {
+		new_h := sec.floor_height - 4
+		if new_h < dest_floor {
+			new_h = dest_floor
+		}
+		map.set_sector_floor_height(sec_id, new_h)
+		times.sleep(28 * times.millisecond)
+		sec = map.get_sector(sec_id)
+	}
+
+	active_sectors[key] = false
+}
+
+// Line special 36: W1 Lower Floor to Lowest Adjacent Floor (Turbo)
+line_special_036 := func(line_id, sec_id, thing_id, tag) {
+	if line_id >= 0 {
+		map.set_line_special(line_id, 0)
+	}
+
+	if tag != 0 {
+		sec_ids := map.find_sectors_by_tag(tag)
+		for s in sec_ids {
+			lower_floor_turbo(s)
+		}
+	} else if sec_id >= 0 {
+		lower_floor_turbo(sec_id)
+	}
+}
+
+export line_special_036

@@ -297,3 +297,43 @@ func TestFreedoomMAP01Collision(t *testing.T) {
 	}
 }
 
+func TestLiftRidingAndMovement(t *testing.T) {
+	// Sector 0 (left: x < 0) is a lift starting at floor 0.
+	// Sector 1 (right: x > 0) is the upper landing at floor 128.
+	mapData := createTwoSectorMap(0, 256, 128, 256, wad.LinedefTwoSided, true)
+
+	player := NewPlayerActor(-50, 0, 41, 0) // Standing on lift in Sector 0, facing East (towards Sector 1)
+	player.FloorZ = 0
+	player.Z = 41
+
+	// 1. Verify player can move around on the lift at floor 0
+	Move(mapData, player, 10, 0, 0)
+	if player.X != -40 {
+		t.Errorf("expected player X -40, got %f", player.X)
+	}
+
+	// 2. The lift raises from floor 0 up to floor 128 (while player stands on it)
+	mapData.Sectors[0].FloorHeight = 128
+
+	// Verify UpdateActorFloor updates player floor and eye height
+	UpdateActorFloor(mapData, player)
+	if player.FloorZ != 128 {
+		t.Errorf("expected player.FloorZ 128 after lift rises, got %f", player.FloorZ)
+	}
+	if player.Z != 128+player.EyeHeight {
+		t.Errorf("expected player.Z %f, got %f", 128+player.EyeHeight, player.Z)
+	}
+
+	// 3. Player moves forward off the lift into Sector 1 (floor 128)
+	// Because both sectors are now at floor 128, movement should NOT be blocked by MaxStepHeight!
+	oldX := player.X
+	Move(mapData, player, 30, 0, 0) // Moves East across x=0 into Sector 1
+	if player.X <= oldX {
+		t.Errorf("expected player to successfully step off the lift at floor 128, but remained at X %f", player.X)
+	}
+	if player.FloorZ != 128 {
+		t.Errorf("expected player to remain at floor height 128, got %f", player.FloorZ)
+	}
+}
+
+

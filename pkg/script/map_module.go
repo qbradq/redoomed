@@ -707,7 +707,176 @@ func createMapModule(getMapData func() *wad.MapData) map[string]tengo.Object {
 		},
 	}
 
+	numSidedefsFunc := &tengo.UserFunction{
+		Name: "num_sidedefs",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return &tengo.Int{Value: 0}, nil
+			}
+			return &tengo.Int{Value: int64(len(m.Sidedefs))}, nil
+		},
+	}
+
+	getSidedefFunc := &tengo.UserFunction{
+		Name: "get_sidedef",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return tengo.UndefinedValue, nil
+			}
+			if len(args) == 0 {
+				return nil, fmt.Errorf("get_sidedef: missing sidedef_id")
+			}
+			sideID, err := toInt(args[0], "sidedef_id")
+			if err != nil {
+				return nil, err
+			}
+			if sideID < 0 || sideID >= len(m.Sidedefs) {
+				return tengo.UndefinedValue, nil
+			}
+			s := &m.Sidedefs[sideID]
+			return &tengo.Map{
+				Value: map[string]tengo.Object{
+					"id":             &tengo.Int{Value: int64(sideID)},
+					"x_offset":       &tengo.Int{Value: int64(s.XOffset)},
+					"y_offset":       &tengo.Int{Value: int64(s.YOffset)},
+					"upper_texture":  &tengo.String{Value: s.UpperTexture},
+					"lower_texture":  &tengo.String{Value: s.LowerTexture},
+					"middle_texture": &tengo.String{Value: s.MiddleTexture},
+					"sector":         &tengo.Int{Value: int64(s.Sector)},
+				},
+			}, nil
+		},
+	}
+
+	setSidedefXOffsetFunc := &tengo.UserFunction{
+		Name: "set_sidedef_x_offset",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return tengo.UndefinedValue, nil
+			}
+			if len(args) < 2 {
+				return nil, fmt.Errorf("set_sidedef_x_offset: expected sidedef_id and offset")
+			}
+			sideID, err := toInt(args[0], "sidedef_id")
+			if err != nil {
+				return nil, err
+			}
+			offset, err := toInt(args[1], "offset")
+			if err != nil {
+				return nil, err
+			}
+			if sideID >= 0 && sideID < len(m.Sidedefs) {
+				m.Sidedefs[sideID].XOffset = int16(offset)
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
+
+	setSidedefYOffsetFunc := &tengo.UserFunction{
+		Name: "set_sidedef_y_offset",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return tengo.UndefinedValue, nil
+			}
+			if len(args) < 2 {
+				return nil, fmt.Errorf("set_sidedef_y_offset: expected sidedef_id and offset")
+			}
+			sideID, err := toInt(args[0], "sidedef_id")
+			if err != nil {
+				return nil, err
+			}
+			offset, err := toInt(args[1], "offset")
+			if err != nil {
+				return nil, err
+			}
+			if sideID >= 0 && sideID < len(m.Sidedefs) {
+				m.Sidedefs[sideID].YOffset = int16(offset)
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
+
+	setSidedefUpperTextureFunc := &tengo.UserFunction{
+		Name: "set_sidedef_upper_texture",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return tengo.UndefinedValue, nil
+			}
+			if len(args) < 2 {
+				return nil, fmt.Errorf("set_sidedef_upper_texture: expected sidedef_id and texture name")
+			}
+			sideID, err := toInt(args[0], "sidedef_id")
+			if err != nil {
+				return nil, err
+			}
+			texStr, ok := args[1].(*tengo.String)
+			if !ok {
+				return nil, fmt.Errorf("set_sidedef_upper_texture: expected string for texture name, found %s", args[1].TypeName())
+			}
+			if sideID >= 0 && sideID < len(m.Sidedefs) {
+				m.Sidedefs[sideID].UpperTexture = texStr.Value
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
+
+	setSidedefLowerTextureFunc := &tengo.UserFunction{
+		Name: "set_sidedef_lower_texture",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return tengo.UndefinedValue, nil
+			}
+			if len(args) < 2 {
+				return nil, fmt.Errorf("set_sidedef_lower_texture: expected sidedef_id and texture name")
+			}
+			sideID, err := toInt(args[0], "sidedef_id")
+			if err != nil {
+				return nil, err
+			}
+			texStr, ok := args[1].(*tengo.String)
+			if !ok {
+				return nil, fmt.Errorf("set_sidedef_lower_texture: expected string for texture name, found %s", args[1].TypeName())
+			}
+			if sideID >= 0 && sideID < len(m.Sidedefs) {
+				m.Sidedefs[sideID].LowerTexture = texStr.Value
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
+
+	setSidedefMiddleTextureFunc := &tengo.UserFunction{
+		Name: "set_sidedef_middle_texture",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return tengo.UndefinedValue, nil
+			}
+			if len(args) < 2 {
+				return nil, fmt.Errorf("set_sidedef_middle_texture: expected sidedef_id and texture name")
+			}
+			sideID, err := toInt(args[0], "sidedef_id")
+			if err != nil {
+				return nil, err
+			}
+			texStr, ok := args[1].(*tengo.String)
+			if !ok {
+				return nil, fmt.Errorf("set_sidedef_middle_texture: expected string for texture name, found %s", args[1].TypeName())
+			}
+			if sideID >= 0 && sideID < len(m.Sidedefs) {
+				m.Sidedefs[sideID].MiddleTexture = texStr.Value
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
+
 	return map[string]tengo.Object{
+
 		// Info & Counts
 		"name":                         getNameFunc,
 		"get_name":                     getNameFunc,
@@ -775,6 +944,23 @@ func createMapModule(getMapData func() *wad.MapData) map[string]tengo.Object {
 		"GetLowestAdjacentFloor":       getLowestAdjacentFloorFunc,
 		"get_highest_adjacent_floor":   getHighestAdjacentFloorFunc,
 		"GetHighestAdjacentFloor":      getHighestAdjacentFloorFunc,
+
+		// Sidedefs
+		"get_sidedef":                  getSidedefFunc,
+		"GetSidedef":                  getSidedefFunc,
+		"set_sidedef_x_offset":         setSidedefXOffsetFunc,
+		"SetSidedefXOffset":            setSidedefXOffsetFunc,
+		"set_sidedef_y_offset":         setSidedefYOffsetFunc,
+		"SetSidedefYOffset":            setSidedefYOffsetFunc,
+		"set_sidedef_upper_texture":    setSidedefUpperTextureFunc,
+		"SetSidedefUpperTexture":       setSidedefUpperTextureFunc,
+		"set_sidedef_lower_texture":    setSidedefLowerTextureFunc,
+		"SetSidedefLowerTexture":       setSidedefLowerTextureFunc,
+		"set_sidedef_middle_texture":   setSidedefMiddleTextureFunc,
+		"SetSidedefMiddleTexture":      setSidedefMiddleTextureFunc,
+		"num_sidedefs":                 numSidedefsFunc,
+		"NumSidedefs":                  numSidedefsFunc,
+		"sidedef_count":                numSidedefsFunc,
 
 		// Things & Vertexes
 		"get_thing":                    getThingFunc,

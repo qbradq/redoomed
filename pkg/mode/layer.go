@@ -540,12 +540,13 @@ func (l *MiniMapLayer) PreventsLowerDrawing() bool { return true }
 
 // LevelViewLayer renders the 2.5D software-rendered level view.
 type LevelViewLayer struct {
-	visible     bool
-	mapData     *wad.MapData
-	renderer    *render.Renderer
-	cam         render.Camera
-	playerActor *physics.Actor
-	hasPlayer   bool
+	visible        bool
+	mapData        *wad.MapData
+	renderer       *render.Renderer
+	cam            render.Camera
+	playerActor    *physics.Actor
+	hasPlayer      bool
+	onCrossLinedef func(lineIdx int, ld *wad.Linedef)
 }
 
 // NewLevelViewLayer creates a new LevelViewLayer (hidden by default, occludes lower layers when visible).
@@ -561,6 +562,11 @@ func NewLevelViewLayer() *LevelViewLayer {
 }
 
 func (l *LevelViewLayer) Name() string { return "Level view" }
+
+// SetOnCrossLinedef sets the callback when the player crosses a linedef.
+func (l *LevelViewLayer) SetOnCrossLinedef(fn func(lineIdx int, ld *wad.Linedef)) {
+	l.onCrossLinedef = fn
+}
 
 // SetMapData updates the active map data and initializes the camera from Player 1 start.
 func (l *LevelViewLayer) SetMapData(m *wad.MapData) {
@@ -628,7 +634,20 @@ func (l *LevelViewLayer) MovePlayer(forward, strafe, turn float64) {
 		l.playerActor = physics.NewPlayerActor(l.cam.X, l.cam.Y, l.cam.Z, l.cam.Angle)
 	}
 
+	oldX, oldY := l.playerActor.X, l.playerActor.Y
+
 	physics.Move(l.mapData, l.playerActor, forward, strafe, turn)
+
+	newX, newY := l.playerActor.X, l.playerActor.Y
+	if (newX != oldX || newY != oldY) && l.onCrossLinedef != nil && l.mapData != nil {
+		crossed := physics.CheckCrossedLines(l.mapData, oldX, oldY, newX, newY)
+		for _, lineIdx := range crossed {
+			if lineIdx >= 0 && lineIdx < len(l.mapData.Linedefs) {
+				ld := &l.mapData.Linedefs[lineIdx]
+				l.onCrossLinedef(lineIdx, ld)
+			}
+		}
+	}
 
 	l.cam.X = l.playerActor.X
 	l.cam.Y = l.playerActor.Y
@@ -636,10 +655,16 @@ func (l *LevelViewLayer) MovePlayer(forward, strafe, turn float64) {
 	l.cam.Angle = l.playerActor.Angle
 }
 
+
 func (l *LevelViewLayer) Update() (bool, error) {
-	if !l.visible {
+	if !l.visible || l.mapData == nil || l.playerActor == nil {
 		return false, nil
 	}
+	physics.UpdateActorFloor(l.mapData, l.playerActor)
+	l.cam.X = l.playerActor.X
+	l.cam.Y = l.playerActor.Y
+	l.cam.Z = l.playerActor.Z
+	l.cam.Angle = l.playerActor.Angle
 	return false, nil
 }
 

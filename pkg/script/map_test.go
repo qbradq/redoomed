@@ -254,3 +254,52 @@ v0 := m.get_vertex(0)
 		t.Errorf("expected v0.x 0, got %q", res)
 	}
 }
+
+func TestMapModuleSidedefs(t *testing.T) {
+	mapData := createTestMapData()
+	repl := NewREPL(nil, nil)
+	repl.SetMapDataProvider(func() *wad.MapData {
+		return mapData
+	})
+
+	code := `
+m := import("map")
+ns := m.num_sidedefs()
+s0 := m.get_sidedef(0)
+m.set_sidedef_x_offset(0, 15)
+m.set_sidedef_y_offset(0, 25)
+m.set_sidedef_upper_texture(0, "STARTAN2")
+m.set_sidedef_lower_texture(0, "DOOR3")
+m.set_sidedef_middle_texture(0, "WALL1")
+s0_after := m.get_sidedef(0)
+`
+	_, err := repl.Eval(code)
+	if err != nil {
+		t.Fatalf("Eval failed: %v", err)
+	}
+
+	res, err := repl.Eval("ns")
+	if err != nil || res != "4" {
+		t.Errorf("expected 4 sidedefs, got %q", res)
+	}
+
+	res, err = repl.Eval("s0_after.x_offset")
+	if err != nil || res != "15" {
+		t.Errorf("expected x_offset 15, got %q", res)
+	}
+
+	res, err = repl.Eval("s0_after.y_offset")
+	if err != nil || res != "25" {
+		t.Errorf("expected y_offset 25, got %q", res)
+	}
+
+	res, err = repl.Eval("s0_after.upper_texture")
+	if err != nil || (res != `"STARTAN2"` && res != "STARTAN2") {
+		t.Errorf("expected upper_texture 'STARTAN2', got %q", res)
+	}
+
+	if mapData.Sidedefs[0].XOffset != 15 || mapData.Sidedefs[0].YOffset != 25 {
+		t.Errorf("expected Go mapData sidedef 0 updated, got %+v", mapData.Sidedefs[0])
+	}
+}
+

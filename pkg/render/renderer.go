@@ -32,6 +32,24 @@ type Camera struct {
 	EyeHeight float64 // Eye height offset above sector floor
 }
 
+type maskedSeg struct {
+	seg        *wad.Seg
+	ld         *wad.Linedef
+	frontSide  *wad.Sidedef
+	frontSec   *wad.Sector
+	backSec    *wad.Sector
+	midTex     *wad.Texture
+	xStart     int
+	xEnd       int
+	tx1        float64
+	tz1        float64
+	dxCam      float64
+	dzCam      float64
+	uOffset1   float64
+	du         float64
+	clipOffset int
+}
+
 // Renderer performs perspective-correct front-to-back 2.5D software rendering of Doom maps.
 type Renderer struct {
 	viewWidth   int
@@ -49,6 +67,11 @@ type Renderer struct {
 	// Per-column 1D occlusion clipping buffers
 	ceilingClip []int
 	floorClip   []int
+
+	// Queued 2-sided masked segs (window grates, iron bars) for back-to-front rendering pass
+	maskedSegs       []maskedSeg
+	maskedClipTop    []int
+	maskedClipBottom []int
 
 	// Pixel RGBA buffer for fast WritePixels
 	pixels []byte
@@ -170,6 +193,11 @@ func (r *Renderer) Render(target *ebiten.Image, mapData *wad.MapData, cam *Camer
 		}
 	}
 
+	// Clear masked seg lists for this frame
+	r.maskedSegs = r.maskedSegs[:0]
+	r.maskedClipTop = r.maskedClipTop[:0]
+	r.maskedClipBottom = r.maskedClipBottom[:0]
+
 	// 2. Adjust camera Z to sector floor height if not already set or updated
 	if sec, ok := mapData.SectorAt(cam.X, cam.Y); ok && sec != nil {
 		eyeH := cam.EyeHeight
@@ -186,7 +214,10 @@ func (r *Renderer) Render(target *ebiten.Image, mapData *wad.MapData, cam *Camer
 		r.renderSubsector(mapData, cam, 0)
 	}
 
-	// 4. Upload rendered pixel buffer to target image
+	// 4. Draw masked segs (2-sided middle textures like grates/bars) back-to-front
+	r.drawMaskedSegs(mapData, cam)
+
+	// 5. Upload rendered pixel buffer to target image
 	target.WritePixels(r.pixels)
 }
 
@@ -769,6 +800,156 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 
 				if frontFloorY < r.floorClip[x] {
 					r.floorClip[x] = clampInt(frontFloorY, -1, r.viewHeight)
+				}
+			}
+		}
+	}
+
+	// Record 2-sided seg with middle texture (window grates, iron bars) for back-to-front composite pass
+	if isTwoSided && backSec != nil && midTex != nil {
+		hasVisibleCol := false
+		clipOffset := len(r.maskedClipTop)
+		for x := xStart; x <= xEnd; x++ {
+			cTop := r.ceilingClip[x]
+			cBottom := r.floorClip[x]
+			r.maskedClipTop = append(r.maskedClipTop, cTop)
+			r.maskedClipBottom = append(r.maskedClipBottom, cBottom)
+			if cTop < cBottom-1 {
+				hasVisibleCol = true
+			}
+		}
+
+		if hasVisibleCol {
+			r.maskedSegs = append(r.maskedSegs, maskedSeg{
+				seg:        seg,
+				ld:         ld,
+				frontSide:  frontSide,
+				frontSec:   frontSec,
+				backSec:    backSec,
+				midTex:     midTex,
+				xStart:     xStart,
+				xEnd:       xEnd,
+				tx1:        tx1,
+				tz1:        tz1,
+				dxCam:      dxCam,
+				dzCam:      dzCam,
+				uOffset1:   uOffset1,
+				du:         du,
+				clipOffset: clipOffset,
+			})
+		} else {
+			r.maskedClipTop = r.maskedClipTop[:clipOffset]
+			r.maskedClipBottom = r.maskedClipBottom[:clipOffset]
+		}
+	}
+}
+
+// drawMaskedSegs renders all queued 2-sided middle textures (window grates, iron bars, fences)
+// in reverse order (back-to-front), respecting closer solid geometry occlusion clipping.
+func (r *Renderer) drawMaskedSegs(mapData *wad.MapData, cam *Camera) {
+	if len(r.maskedSegs) == 0 {
+		return
+	}
+
+	texMgr := mapData.Textures
+	palette := [256]color.RGBA{}
+	if texMgr != nil {
+		palette = texMgr.PaletteRGBA()
+	}
+
+	// Render in reverse order (back-to-front relative to front-to-back BSP traversal)
+	for i := len(r.maskedSegs) - 1; i >= 0; i-- {
+		ms := &r.maskedSegs[i]
+		if ms.midTex == nil || ms.midTex.Height <= 0 || ms.midTex.Width <= 0 {
+			continue
+		}
+
+		// Calculate world topZ and bottomZ based on standard Doom pegging rules
+		var topZ, bottomZ float64
+		if ms.ld.Flags&wad.LinedefDontPegBottom != 0 {
+			// Lower unpegged: aligned to highest floor, extending upwards
+			floorH := float64(ms.frontSec.FloorHeight)
+			if ms.backSec != nil && float64(ms.backSec.FloorHeight) > floorH {
+				floorH = float64(ms.backSec.FloorHeight)
+			}
+			bottomZ = floorH + float64(ms.frontSide.YOffset)
+			topZ = bottomZ + float64(ms.midTex.Height)
+		} else {
+			// Top pegged: aligned to lowest ceiling, extending downwards
+			ceilH := float64(ms.frontSec.CeilingHeight)
+			if ms.backSec != nil && float64(ms.backSec.CeilingHeight) < ceilH {
+				ceilH = float64(ms.backSec.CeilingHeight)
+			}
+			topZ = ceilH + float64(ms.frontSide.YOffset)
+			bottomZ = topZ - float64(ms.midTex.Height)
+		}
+
+		for x := ms.xStart; x <= ms.xEnd; x++ {
+			clipTop := r.maskedClipTop[ms.clipOffset+(x-ms.xStart)]
+			clipBottom := r.maskedClipBottom[ms.clipOffset+(x-ms.xStart)]
+			if clipTop >= clipBottom-1 {
+				continue
+			}
+
+			kx := r.colKx[x]
+			denom := ms.dxCam - kx*ms.dzCam
+			if math.Abs(denom) < 1e-9 {
+				continue
+			}
+
+			s := (kx*ms.tz1 - ms.tx1) / denom
+			if s < 0.0 {
+				s = 0.0
+			} else if s > 1.0 {
+				s = 1.0
+			}
+
+			tz := ms.tz1 + s*ms.dzCam
+			if tz < 0.1 {
+				tz = 0.1
+			}
+			scale := r.focalLength / tz
+
+			uWorld := float64(ms.seg.Offset) + ms.uOffset1 + s*ms.du + float64(ms.frontSide.XOffset)
+			texU := int(math.Floor(uWorld))
+
+			midTopY := int(math.Round(r.centerY - (topZ-cam.Z)*scale))
+			midBottomY := int(math.Round(r.centerY - (bottomZ-cam.Z)*scale))
+
+			wallTop := midTopY
+			if wallTop < clipTop+1 {
+				wallTop = clipTop + 1
+			}
+			wallBottom := midBottomY
+			if wallBottom > clipBottom-1 {
+				wallBottom = clipBottom - 1
+			}
+
+			wallTop = clampInt(wallTop, 0, r.viewHeight-1)
+			wallBottom = clampInt(wallBottom, 0, r.viewHeight-1)
+
+			if wallBottom >= wallTop {
+				cmIdx := 0
+				if texMgr != nil {
+					cmIdx = texMgr.LightToColormap(int(ms.frontSec.LightLevel), tz)
+				}
+
+				for y := wallTop; y <= wallBottom; y++ {
+					texV := int(math.Floor(topZ - (cam.Z - (float64(y)-r.centerY)/scale)))
+					if texV < 0 || texV >= ms.midTex.Height {
+						continue
+					}
+
+					palIdx, opaque := ms.midTex.PixelAt(texU, texV)
+					if opaque {
+						var clr color.RGBA
+						if texMgr != nil {
+							clr = palette[texMgr.MapColor(cmIdx, palIdx)]
+						} else {
+							clr = color.RGBA{R: 200, G: 200, B: 200, A: 255}
+						}
+						r.setPixel(x, y, clr)
+					}
 				}
 			}
 		}

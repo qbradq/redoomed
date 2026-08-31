@@ -119,6 +119,25 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 		g.Use()
 	})
 
+	levelView.SetOnCrossLinedef(func(lineIdx int, ld *wad.Linedef) {
+		if ld != nil && ld.Special != 0 {
+			md := g.MapData()
+			msg := fmt.Sprintf("Cross: line %d (Special: %d, Tag: %d, Flags: 0x%04X)", lineIdx, ld.Special, ld.Tag, ld.Flags)
+			log.Print(msg)
+			if g.onLog != nil {
+				g.onLog(msg)
+			}
+			if g.onTriggerLineSpecial != nil {
+				secID := -1
+				if ld.RightSide != 0xFFFF && md != nil && int(ld.RightSide) < len(md.Sidedefs) {
+					secID = int(md.Sidedefs[ld.RightSide].Sector)
+				}
+				thingID := 0
+				g.onTriggerLineSpecial(int(ld.Special), lineIdx, secID, thingID, int(ld.Tag))
+			}
+		}
+	})
+
 	return g
 }
 
@@ -137,9 +156,28 @@ func (g *GameMode) SetMapName(name string) {
 			g.levelViewLayer.SetVisible(true)
 			g.miniMapLayer.SetVisible(false)
 			g.intermissionLayer.SetVisible(false)
+			g.initMapSpecials(md)
 		}
 	}
 }
+
+// initMapSpecials launches any ambient map line specials (such as Special 48 scrolling textures).
+func (g *GameMode) initMapSpecials(md *wad.MapData) {
+	if md == nil || g.onTriggerLineSpecial == nil {
+		return
+	}
+	for i := range md.Linedefs {
+		ld := &md.Linedefs[i]
+		if ld.Special == 48 {
+			secID := -1
+			if ld.RightSide != 0xFFFF && int(ld.RightSide) < len(md.Sidedefs) {
+				secID = int(md.Sidedefs[ld.RightSide].Sector)
+			}
+			g.onTriggerLineSpecial(int(ld.Special), i, secID, 0, int(ld.Tag))
+		}
+	}
+}
+
 
 // MapData returns the active map data from the level view layer (or mini map layer), or nil if none loaded.
 func (g *GameMode) MapData() *wad.MapData {
@@ -207,7 +245,11 @@ func (g *GameMode) SetOnLog(fn func(string)) {
 // SetOnTriggerLineSpecial sets the callback when a line special is triggered.
 func (g *GameMode) SetOnTriggerLineSpecial(fn func(special, lineID, secID, thingID, tag int)) {
 	g.onTriggerLineSpecial = fn
+	if fn != nil && g.MapData() != nil {
+		g.initMapSpecials(g.MapData())
+	}
 }
+
 
 // Use triggers a line interaction check in front of the player, prints a debug message,
 // and invokes any associated line special function.

@@ -1,0 +1,38 @@
+fmt := import("fmt")
+game := import("game")
+map := import("map")
+text := import("text")
+
+// Line special 11: S1 Exit Level (Switch Exit)
+line_special_011 := func(line_id, sec_id, thing_id, tag) {
+	if line_id >= 0 {
+		map.set_line_special(line_id, 0)
+	}
+
+	cur_map := text.to_upper(map.get_name())
+	next_map := "E1M2"
+
+	if len(cur_map) == 4 && cur_map[0] == 'E' && cur_map[2] == 'M' {
+		ep := cur_map[1:2]
+		m_char := cur_map[3]
+		m_num := int(m_char) - int('0')
+		next_num := m_num + 1
+		if next_num > 9 {
+			next_num = 1
+		}
+		next_map = fmt.sprintf("E%sM%d", ep, next_num)
+	} else if len(cur_map) == 5 && text.has_prefix(cur_map, "MAP") {
+		tens := int(cur_map[3]) - int('0')
+		ones := int(cur_map[4]) - int('0')
+		map_num := tens*10 + ones
+		next_num := map_num + 1
+		if next_num > 32 {
+			next_num = 1
+		}
+		next_map = fmt.sprintf("MAP%02d", next_num)
+	}
+
+	game.start_map(next_map)
+}
+
+export line_special_011
