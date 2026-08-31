@@ -711,7 +711,7 @@ func (l *MiniMapLayer) Draw(screen *ebiten.Image) {
 		x1, y1 := worldToScreen(float64(v1.X), float64(v1.Y))
 		x2, y2 := worldToScreen(float64(v2.X), float64(v2.Y))
 
-		vector.StrokeLine(screen, x1, y1, x2, y2, 1.0, clr, false)
+		vector.StrokeLine(screen, x1, y1, x2, y2, 1.0, clr, true)
 	}
 
 	// 4. Draw collectible items (triangles / small diamonds)
@@ -758,14 +758,12 @@ func (l *MiniMapLayer) Draw(screen *ebiten.Image) {
 		green := gfx.EGABrightGreen
 
 		// Chunky square (4x4 pixels centered on player coordinates)
-		squareSize := float32(4.0)
-		vector.DrawFilledRect(screen, px-squareSize/2.0, py-squareSize/2.0, squareSize, squareSize, green, false)
+		vector.DrawFilledRect(screen, px-2, py-2, 4, 4, green, false)
 
-		// View direction line extending from player center
-		lineLen := 7.0
-		endX := px + float32(dirX*lineLen)
-		endY := py + float32(dirY*lineLen)
-		vector.StrokeLine(screen, px, py, endX, endY, 1.5, green, false)
+		// View direction line (8 pixels length)
+		endX := px + float32(dirX*8.0)
+		endY := py + float32(dirY*8.0)
+		vector.StrokeLine(screen, px, py, endX, endY, 1.5, green, true)
 	}
 }
 

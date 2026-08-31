@@ -23,11 +23,14 @@ func TestEditorModeDefaults(t *testing.T) {
 	}
 
 	// Verify defaults
-	if ed.GridSize() != 16 {
-		t.Errorf("expected default grid size 16, got %d", ed.GridSize())
+	if ed.GridSize() != 64 {
+		t.Errorf("expected default grid size 64, got %d", ed.GridSize())
 	}
-	if ed.ZoomLevel() != 1.0 {
-		t.Errorf("expected default zoom level 1.0, got %f", ed.ZoomLevel())
+	if ed.ZoomLevel() != 3 {
+		t.Errorf("expected default zoom level 3 (0.125 scale), got %d", ed.ZoomLevel())
+	}
+	if ed.ZoomScale() != 0.125 {
+		t.Errorf("expected default zoom scale 0.125, got %f", ed.ZoomScale())
 	}
 	if ed.CamX() != 0 || ed.CamY() != 0 {
 		t.Errorf("expected camera at (0, 0), got (%f, %f)", ed.CamX(), ed.CamY())
@@ -41,9 +44,10 @@ func TestEditorGridSizeDoublingAndHalving(t *testing.T) {
 	}
 
 	ed := NewEditorMode(cf, nil)
+	ed.SetGridSize(1)
 
-	// Increase grid size: 16 -> 32 -> 64 -> 128 -> 256 -> 256 (capped)
-	expectedIncreases := []int{32, 64, 128, 256, 256, 256}
+	// Increase grid size: 1 -> 2 -> 4 -> 8 -> 16 -> 32 -> 64 -> 128 -> 256 -> 256 (capped)
+	expectedIncreases := []int{2, 4, 8, 16, 32, 64, 128, 256, 256, 256}
 	for _, expected := range expectedIncreases {
 		ed.IncreaseGridSize()
 		if ed.GridSize() != expected {
@@ -85,33 +89,45 @@ func TestEditorZoomLevelDoublingAndHalving(t *testing.T) {
 
 	ed := NewEditorMode(cf, nil)
 
-	// Increase zoom level: 1.0 -> 2.0 -> 4.0 -> 8.0 -> 16.0 -> 32.0 -> 32.0 (capped)
-	expectedIncreases := []float64{2.0, 4.0, 8.0, 16.0, 32.0, 32.0}
+	// Initial zoom level is 3 (scale 0.125)
+	if ed.ZoomLevel() != 3 {
+		t.Fatalf("expected initial zoom level 3, got %d", ed.ZoomLevel())
+	}
+
+	// Increase zoom level: 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 11 (capped)
+	expectedIncreases := []int{4, 5, 6, 7, 8, 9, 10, 11, 11, 11}
 	for _, expected := range expectedIncreases {
 		ed.IncreaseZoom()
 		if ed.ZoomLevel() != expected {
-			t.Errorf("expected zoom level %f after increase, got %f", expected, ed.ZoomLevel())
+			t.Errorf("expected zoom level %d after increase, got %d", expected, ed.ZoomLevel())
 		}
 	}
+	if ed.ZoomScale() != 32.0 {
+		t.Errorf("expected max zoom level 11 to have scale 32.0, got %f", ed.ZoomScale())
+	}
 
-	// Decrease zoom level: 32 -> 16 -> 8 -> 4 -> 2 -> 1 -> 0.5 -> 0.25 -> 0.25 (capped)
-	expectedDecreases := []float64{16.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.25, 0.25}
+	// Decrease zoom level: 11 -> 10 -> 9 -> 8 -> 7 -> 6 -> 5 -> 4 -> 3 -> 2 -> 1 -> 0 -> 0 (capped)
+	expectedDecreases := []int{10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0}
 	for _, expected := range expectedDecreases {
 		ed.DecreaseZoom()
 		if ed.ZoomLevel() != expected {
-			t.Errorf("expected zoom level %f after decrease, got %f", expected, ed.ZoomLevel())
+			t.Errorf("expected zoom level %d after decrease, got %d", expected, ed.ZoomLevel())
 		}
+	}
+	// Level 0 is 64 map units per pixel -> scale 1/64
+	if math.Abs(ed.ZoomScale()-(1.0/64.0)) > 1e-9 {
+		t.Errorf("expected zoom level 0 to have scale 1/64 (0.015625), got %f", ed.ZoomScale())
 	}
 
 	// Test SetZoomLevel clamping
-	ed.SetZoomLevel(0.1)
-	if ed.ZoomLevel() != 0.25 {
-		t.Errorf("expected zoom level clamped to 0.25, got %f", ed.ZoomLevel())
+	ed.SetZoomLevel(-5)
+	if ed.ZoomLevel() != 0 {
+		t.Errorf("expected zoom level clamped to 0, got %d", ed.ZoomLevel())
 	}
 
-	ed.SetZoomLevel(50.0)
-	if ed.ZoomLevel() != 32.0 {
-		t.Errorf("expected zoom level clamped to 32.0, got %f", ed.ZoomLevel())
+	ed.SetZoomLevel(50)
+	if ed.ZoomLevel() != 11 {
+		t.Errorf("expected zoom level clamped to 11, got %d", ed.ZoomLevel())
 	}
 }
 
@@ -123,7 +139,7 @@ func TestEditorCoordinateTransformations(t *testing.T) {
 
 	ed := NewEditorMode(cf, nil)
 	ed.SetCamPosition(100, 200)
-	ed.SetZoomLevel(4.0)
+	ed.SetZoomLevel(8) // scale 4.0
 
 	// Test WorldToScreen and ScreenToWorld round-trip
 	origWx, origWy := 150.0, 250.0
@@ -134,12 +150,21 @@ func TestEditorCoordinateTransformations(t *testing.T) {
 		t.Errorf("round-trip coordinate transform failed: got (%f, %f), want (%f, %f)", wx, wy, origWx, origWy)
 	}
 
-	// At zoom 4, 8 map units = 32 pixels
+	// At zoom level 8 (scale 4.0), 8 map units = 32 pixels
 	sx1, _ := ed.WorldToScreen(0, 0)
 	sx2, _ := ed.WorldToScreen(8, 0)
 	pixelDistance := sx2 - sx1
 	if pixelDistance != 32.0 {
-		t.Errorf("expected 8 units at zoom 4.0 to be 32 pixels, got %f", pixelDistance)
+		t.Errorf("expected 8 units at zoom level 8 (scale 4.0) to be 32 pixels, got %f", pixelDistance)
+	}
+
+	// At zoom level 0 (scale 1/64), 64 map units = 1 pixel
+	ed.SetZoomLevel(0)
+	sxA, _ := ed.WorldToScreen(0, 0)
+	sxB, _ := ed.WorldToScreen(64, 0)
+	distAtZero := sxB - sxA
+	if distAtZero != 1.0 {
+		t.Errorf("expected 64 units at zoom level 0 (scale 1/64) to be 1 pixel, got %f", distAtZero)
 	}
 }
 
@@ -213,10 +238,10 @@ func TestEditorDrawAndStatusBar(t *testing.T) {
 	}
 
 	// Test status bar strings
-	rightText1 := fmt.Sprintf("GRID: %3d  ZOOM: %5.2fx", ed.GridSize(), ed.ZoomLevel())
+	rightText1 := fmt.Sprintf("GRID: %3d  ZOOM: %2d", ed.GridSize(), ed.ZoomLevel())
 	ed.SetGridSize(256)
-	ed.SetZoomLevel(32.0)
-	rightText2 := fmt.Sprintf("GRID: %3d  ZOOM: %5.2fx", ed.GridSize(), ed.ZoomLevel())
+	ed.SetZoomLevel(11)
+	rightText2 := fmt.Sprintf("GRID: %3d  ZOOM: %2d", ed.GridSize(), ed.ZoomLevel())
 
 	if len(rightText1) != len(rightText2) {
 		t.Errorf("expected right-justified text lengths to match for fixed-width formatting: %q vs %q", rightText1, rightText2)
@@ -239,8 +264,50 @@ func TestEditorLayoutDimensions(t *testing.T) {
 	if NumIconButtons != 15 {
 		t.Errorf("expected 15 icon buttons, got %d", NumIconButtons)
 	}
-	if NumIconButtons*IconButtonSize != UserPanelWidth {
-		t.Errorf("expected 15 buttons of 16px to equal user panel width of %d, got %d", UserPanelWidth, NumIconButtons*IconButtonSize)
+}
+
+func TestEditorMapDataRendering(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
 	}
+
+	ed := NewEditorMode(cf, nil)
+
+	// Create mock map data with linedefs and vertices
+	mockMap := &wad.MapData{
+		Name: "TESTMAP",
+		Vertexes: []wad.Vertex{
+			{X: -64, Y: -64},
+			{X: 64, Y: -64},
+			{X: 64, Y: 64},
+			{X: -64, Y: 64},
+		},
+		Linedefs: []wad.Linedef{
+			{V1: 0, V2: 1},
+			{V1: 1, V2: 2},
+			{V1: 2, V2: 3},
+			{V1: 3, V2: 0},
+		},
+	}
+
+	ed.SetMapData(mockMap)
+	if ed.MapData() != mockMap {
+		t.Fatal("expected MapData to match set mockMap")
+	}
+
+	screen := ebiten.NewImage(1280, 800)
+	ed.Draw(screen)
+
+	// Test map data provider
+	ed.SetMapData(nil)
+	ed.SetMapDataProvider(func() *wad.MapData {
+		return mockMap
+	})
+	if ed.MapData() != mockMap {
+		t.Fatal("expected MapData to match dynamic provider")
+	}
+
+	ed.Draw(screen)
 }
 

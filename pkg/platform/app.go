@@ -119,13 +119,19 @@ func NewAppWithIWAD(iwadPath string) *App {
 		app.consoleMode.PrintColored(msg, gfx.EGABrightCyan)
 	})
 
-	// Initialize EditorMode at 1280x800 resolution
+	// Initialize EditorMode at 640x400 base resolution
 	app.editorMode = mode.NewEditorMode(app.consoleFont, app.wadFile)
 	app.editorMode.SetOnToggle(func() {
 		app.ToggleEditor()
 	})
 	app.editorMode.SetOnToggleConsole(func() {
 		app.ToggleConsole()
+	})
+	app.editorMode.SetMapDataProvider(func() *wad.MapData {
+		if app.gameMode != nil {
+			return app.gameMode.MapData()
+		}
+		return nil
 	})
 
 	// Initialize Tengo REPL with exit, start_map, and music handlers
@@ -253,12 +259,25 @@ func (a *App) ToggleEditor() {
 
 // StartMap enters the game mode for the given map name, starts map music, and hides the console.
 func (a *App) StartMap(mapName string) {
+	// Fallback between Doom 1 (ExMy) and Doom 2 (MAPxy) map naming if requested map header is missing
+	if a.wadFile != nil && a.wadFile.GetLumpIndex(mapName) < 0 {
+		if (mapName == "E1M1" || mapName == "e1m1") && a.wadFile.GetLumpIndex("MAP01") >= 0 {
+			mapName = "MAP01"
+		} else if (mapName == "MAP01" || mapName == "map01") && a.wadFile.GetLumpIndex("E1M1") >= 0 {
+			mapName = "E1M1"
+		}
+	}
+
 	if a.gameMode == nil {
 		a.gameMode = mode.NewGameMode(mapName, a.wadFile, func() {
 			a.ToggleConsole()
 		})
 	} else {
 		a.gameMode.SetMapName(mapName)
+	}
+
+	if a.editorMode != nil && a.gameMode != nil && a.gameMode.MapData() != nil {
+		a.editorMode.SetMapData(a.gameMode.MapData())
 	}
 
 	if a.musicMgr != nil && mapName != "" {

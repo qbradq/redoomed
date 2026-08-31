@@ -52,16 +52,33 @@ const (
 	MinGridSize = 1
 	// MaxGridSize is the maximum allowed grid size (256 units).
 	MaxGridSize = 256
-	// DefaultGridSize is the initial grid size (16 units).
-	DefaultGridSize = 16
+	// DefaultGridSize is the initial grid size (64 units).
+	DefaultGridSize = 64
 
-	// MinZoomLevel is the minimum allowed zoom level (0.25 pixels per unit).
-	MinZoomLevel = 0.25
-	// MaxZoomLevel is the maximum allowed zoom level (32 pixels per unit).
-	MaxZoomLevel = 32.0
-	// DefaultZoomLevel is the initial zoom level (1.0 pixel per unit).
-	DefaultZoomLevel = 1.0
+	// MinZoomLevel is the minimum zoom level index (0 = 64 map units per pixel).
+	MinZoomLevel = 0
+	// MaxZoomLevel is the maximum zoom level index (11 = 32 pixels per map unit).
+	MaxZoomLevel = 11
+	// DefaultZoomLevel is the initial zoom level index (3 = 8 map units per pixel).
+	DefaultZoomLevel = 3
 )
+
+// ZoomScales maps zoom levels 0..11 to pixels per map unit.
+// Level 0 is 1/64 (64 units per pixel), Level 6 is 1.0 (1 unit per pixel), Level 11 is 32.0 (32 pixels per unit).
+var ZoomScales = [12]float64{
+	1.0 / 64.0, // Level 0: 64 map units per pixel
+	1.0 / 32.0, // Level 1: 32 map units per pixel
+	1.0 / 16.0, // Level 2: 16 map units per pixel
+	1.0 / 8.0,  // Level 3: 8 map units per pixel
+	1.0 / 4.0,  // Level 4: 4 map units per pixel
+	1.0 / 2.0,  // Level 5: 2 map units per pixel
+	1.0,        // Level 6: 1 map unit per pixel
+	2.0,        // Level 7: 2 pixels per map unit
+	4.0,        // Level 8: 4 pixels per map unit
+	8.0,        // Level 9: 8 pixels per map unit
+	16.0,       // Level 10: 16 pixels per map unit
+	32.0,       // Level 11: 32 pixels per map unit
+}
 
 // IconButton represents a single 16x16 icon button slot in the user panel.
 type IconButton struct {
@@ -73,12 +90,16 @@ type IconButton struct {
 
 // EditorMode represents the 640x400 map editor mode composited to the screen.
 type EditorMode struct {
-	buffer  *ebiten.Image
-	wadFile *wad.WAD
-	font    *font.ConsoleFont
+	buffer          *ebiten.Image
+	wadFile         *wad.WAD
+	mapData         *wad.MapData
+	mapDataProvider func() *wad.MapData
+	lastMapData     *wad.MapData
+	hasCenteredCam  bool
+	font            *font.ConsoleFont
 
 	gridSize  int
-	zoomLevel float64
+	zoomLevel int
 
 	// Camera world position (map units) centered in the editing window
 	camX float64
@@ -129,6 +150,48 @@ func (e *EditorMode) SetWAD(w *wad.WAD) {
 // WAD returns the active WAD container.
 func (e *EditorMode) WAD() *wad.WAD {
 	return e.wadFile
+}
+
+// SetMapData sets the active map geometry data to display and centers the camera on it.
+func (e *EditorMode) SetMapData(m *wad.MapData) {
+	e.mapData = m
+	e.lastMapData = m
+	if m != nil {
+		e.hasCenteredCam = true
+		e.CenterOnMap()
+	}
+}
+
+// SetMapDataProvider sets a dynamic provider function for map data.
+func (e *EditorMode) SetMapDataProvider(fn func() *wad.MapData) {
+	e.mapDataProvider = fn
+}
+
+// MapData returns the active map geometry data.
+func (e *EditorMode) MapData() *wad.MapData {
+	if e.mapData != nil {
+		return e.mapData
+	}
+	if e.mapDataProvider != nil {
+		return e.mapDataProvider()
+	}
+	return nil
+}
+
+// CenterOnMap centers the camera on the map's player 1 start position or bounding box center.
+func (e *EditorMode) CenterOnMap() {
+	md := e.MapData()
+	if md == nil {
+		return
+	}
+	if p1, ok := md.Player1Start(); ok {
+		e.camX = float64(p1.X)
+		e.camY = float64(p1.Y)
+		return
+	}
+	minX, maxX, minY, maxY := md.Bounds()
+	e.camX = float64(minX+maxX) / 2.0
+	e.camY = float64(minY+maxY) / 2.0
 }
 
 // SetFont updates the console font reference for the editor.
@@ -192,13 +255,24 @@ func (e *EditorMode) DecreaseGridSize() {
 	}
 }
 
-// ZoomLevel returns the current zoom level (pixels per map unit).
-func (e *EditorMode) ZoomLevel() float64 {
+// ZoomLevel returns the current zoom level index (0..11).
+func (e *EditorMode) ZoomLevel() int {
 	return e.zoomLevel
 }
 
-// SetZoomLevel sets the zoom level, clamping it between MinZoomLevel (0.25) and MaxZoomLevel (32).
-func (e *EditorMode) SetZoomLevel(z float64) {
+// ZoomScale returns the pixels per map unit scale corresponding to the current zoom level.
+func (e *EditorMode) ZoomScale() float64 {
+	if e.zoomLevel < 0 {
+		return ZoomScales[0]
+	}
+	if e.zoomLevel >= len(ZoomScales) {
+		return ZoomScales[len(ZoomScales)-1]
+	}
+	return ZoomScales[e.zoomLevel]
+}
+
+// SetZoomLevel sets the zoom level index, clamping it between MinZoomLevel (0) and MaxZoomLevel (11).
+func (e *EditorMode) SetZoomLevel(z int) {
 	if z <= MinZoomLevel {
 		e.zoomLevel = MinZoomLevel
 		return
@@ -210,23 +284,17 @@ func (e *EditorMode) SetZoomLevel(z float64) {
 	e.zoomLevel = z
 }
 
-// IncreaseZoom doubles the zoom level up to MaxZoomLevel (32).
+// IncreaseZoom steps up the zoom level index up to MaxZoomLevel (11).
 func (e *EditorMode) IncreaseZoom() {
 	if e.zoomLevel < MaxZoomLevel {
-		e.zoomLevel *= 2.0
-		if e.zoomLevel > MaxZoomLevel {
-			e.zoomLevel = MaxZoomLevel
-		}
+		e.zoomLevel++
 	}
 }
 
-// DecreaseZoom halves the zoom level down to MinZoomLevel (0.25).
+// DecreaseZoom steps down the zoom level index down to MinZoomLevel (0).
 func (e *EditorMode) DecreaseZoom() {
 	if e.zoomLevel > MinZoomLevel {
-		e.zoomLevel /= 2.0
-		if e.zoomLevel < MinZoomLevel {
-			e.zoomLevel = MinZoomLevel
-		}
+		e.zoomLevel--
 	}
 }
 
@@ -250,8 +318,9 @@ func (e *EditorMode) SetCamPosition(x, y float64) {
 func (e *EditorMode) WorldToScreen(wx, wy float64) (float64, float64) {
 	centerX := float64(EditingWindowWidth) / 2.0
 	centerY := float64(EditingWindowHeight) / 2.0
-	sx := centerX + (wx-e.camX)*e.zoomLevel
-	sy := centerY - (wy-e.camY)*e.zoomLevel // Doom +Y is up, screen +Y is down
+	scale := e.ZoomScale()
+	sx := centerX + (wx-e.camX)*scale
+	sy := centerY - (wy-e.camY)*scale // Doom +Y is up, screen +Y is down
 	return sx, sy
 }
 
@@ -259,8 +328,9 @@ func (e *EditorMode) WorldToScreen(wx, wy float64) (float64, float64) {
 func (e *EditorMode) ScreenToWorld(sx, sy float64) (float64, float64) {
 	centerX := float64(EditingWindowWidth) / 2.0
 	centerY := float64(EditingWindowHeight) / 2.0
-	wx := e.camX + (sx-centerX)/e.zoomLevel
-	wy := e.camY - (sy-centerY)/e.zoomLevel
+	scale := e.ZoomScale()
+	wx := e.camX + (sx-centerX)/scale
+	wy := e.camY - (sy-centerY)/scale
 	return wx, wy
 }
 
@@ -333,15 +403,16 @@ func (e *EditorMode) Update() error {
 		} else {
 			dx := float64(mx - e.panStartX)
 			dy := float64(my - e.panStartY)
-			e.camX = e.origCamX - dx/e.zoomLevel
-			e.camY = e.origCamY + dy/e.zoomLevel
+			scale := e.ZoomScale()
+			e.camX = e.origCamX - dx/scale
+			e.camY = e.origCamY + dy/scale
 		}
 	} else {
 		e.isPanning = false
 	}
 
 	// Panning with arrow keys
-	panStep := 16.0 / e.zoomLevel
+	panStep := 16.0 / e.ZoomScale()
 	if ebiten.IsKeyPressed(ebiten.KeyLeft) {
 		e.camX -= panStep
 	}
@@ -353,6 +424,11 @@ func (e *EditorMode) Update() error {
 	}
 	if ebiten.IsKeyPressed(ebiten.KeyDown) {
 		e.camY -= panStep
+	}
+
+	// Center camera on map with C or Home key
+	if inpututil.IsKeyJustPressed(ebiten.KeyC) || inpututil.IsKeyJustPressed(ebiten.KeyHome) {
+		e.CenterOnMap()
 	}
 
 	// Update button hover states
@@ -391,7 +467,7 @@ func (e *EditorMode) Draw(screen *ebiten.Image) {
 	screen.DrawImage(e.buffer, op)
 }
 
-// drawEditingWindow renders the editing background and grid lines.
+// drawEditingWindow renders the editing background, darker grid lines, and map geometry (linedefs and vertices).
 func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 	// Fill editing area background with black
 	vector.DrawFilledRect(dst, 0, 0, EditingWindowWidth, EditingWindowHeight, gfx.EGABlack, false)
@@ -401,11 +477,11 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 	maxWx, minWy := e.ScreenToWorld(EditingWindowWidth, EditingWindowHeight)
 
 	gridStep := float64(e.gridSize)
-	pixelSpacing := gridStep * e.zoomLevel
+	pixelSpacing := gridStep * e.ZoomScale()
 
-	// Only draw grid lines if spacing is at least 1 pixel
+	// 1. Draw darker grid lines
 	if pixelSpacing >= 1.0 {
-		gridColor := gfx.EGALightGray
+		gridColor := color.RGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xFF}
 
 		// Vertical grid lines
 		startK := int(math.Floor(minWx / gridStep))
@@ -428,6 +504,40 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 			_, sy := e.WorldToScreen(0, wy)
 			if sy >= 0 && sy < EditingWindowHeight {
 				vector.StrokeLine(dst, 0, float32(sy), float32(EditingWindowWidth), float32(sy), 1.0, gridColor, false)
+			}
+		}
+	}
+
+	// 2. Draw map geometry (linedefs and vertices) in white
+	md := e.MapData()
+	if md != nil {
+		if !e.hasCenteredCam || e.lastMapData != md {
+			e.lastMapData = md
+			e.hasCenteredCam = true
+			e.CenterOnMap()
+		}
+
+		white := gfx.EGABrightWhite
+
+		// Draw 1px-wide linedef lines
+		for _, ld := range md.Linedefs {
+			if int(ld.V1) < len(md.Vertexes) && int(ld.V2) < len(md.Vertexes) {
+				v1 := md.Vertexes[ld.V1]
+				v2 := md.Vertexes[ld.V2]
+				x1, y1 := e.WorldToScreen(float64(v1.X), float64(v1.Y))
+				x2, y2 := e.WorldToScreen(float64(v2.X), float64(v2.Y))
+				vector.StrokeLine(dst, float32(x1), float32(y1), float32(x2), float32(y2), 1.0, white, true)
+			}
+		}
+
+		// Draw vertices as chunky squares (4x4)
+		const vertexSize = 4.0
+		const halfVertex = vertexSize / 2.0
+		for _, v := range md.Vertexes {
+			vx, vy := e.WorldToScreen(float64(v.X), float64(v.Y))
+			if vx >= -10 && vx <= float64(EditingWindowWidth)+10 &&
+				vy >= -10 && vy <= float64(EditingWindowHeight)+10 {
+				vector.DrawFilledRect(dst, float32(vx)-halfVertex, float32(vy)-halfVertex, vertexSize, vertexSize, white, false)
 			}
 		}
 	}
@@ -478,7 +588,7 @@ func (e *EditorMode) drawStatusBar(dst *ebiten.Image) {
 	e.font.DrawText(dst, leftText, StatusBarX, StatusBarY, gfx.EGABrightYellow)
 
 	// 2. Right-justified: Grid and Zoom settings in fixed-width fields
-	rightText := fmt.Sprintf("GRID: %3d  ZOOM: %5.2fx", e.gridSize, e.zoomLevel)
+	rightText := fmt.Sprintf("GRID: %3d  ZOOM: %2d", e.gridSize, e.zoomLevel)
 	rightTextWidth, _ := e.font.MeasureText(rightText)
 	rightX := StatusBarWidth - rightTextWidth
 	if rightX > 0 {
