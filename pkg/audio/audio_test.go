@@ -125,4 +125,19 @@ func TestMusicManagerVolumeAndState(t *testing.T) {
 	if mgr.Volume() != 0.0 {
 		t.Errorf("expected clamped volume 0.0, got %f", mgr.Volume())
 	}
+
+	// In test environment, MusicManager should default to muted
+	if !mgr.IsMuted() {
+		t.Errorf("expected MusicManager to be muted in test environment")
+	}
+
+	mgr.SetMuted(false)
+	if mgr.IsMuted() {
+		t.Errorf("expected IsMuted() to be false after SetMuted(false)")
+	}
+
+	mgr.SetMuted(true)
+	if !mgr.IsMuted() {
+		t.Errorf("expected IsMuted() to be true after SetMuted(true)")
+	}
 }

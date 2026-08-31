@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"strings"
@@ -10,6 +11,11 @@ import (
 
 	"github.com/qbradq/redoomed/pkg/wad"
 )
+
+// isTestEnv checks if the current process is running in a go test runner.
+func isTestEnv() bool {
+	return flag.Lookup("test.v") != nil || flag.Lookup("test.run") != nil || flag.Lookup("test.timeout") != nil
+}
 
 // MusicManager manages background music playback, track transitions, volume, and looping.
 type MusicManager struct {
@@ -24,6 +30,7 @@ type MusicManager struct {
 }
 
 // NewMusicManager initializes or reuses the audio context and creates a new MusicManager instance.
+// If running under go test, music is automatically muted so tests do not output audio to speakers.
 func NewMusicManager(w *wad.WAD) *MusicManager {
 	ctx := audio.CurrentContext()
 	if ctx == nil {
@@ -33,6 +40,7 @@ func NewMusicManager(w *wad.WAD) *MusicManager {
 		audioCtx:   ctx,
 		wadFile:    w,
 		volume:     0.7, // Default 70% volume
+		muted:      isTestEnv(),
 		sampleRate: DefaultSampleRate,
 	}
 }
@@ -65,6 +73,27 @@ func (m *MusicManager) SetVolume(v float64) {
 	if m.player != nil && !m.muted {
 		m.player.SetVolume(v)
 	}
+}
+
+// SetMuted sets whether the music output is muted.
+func (m *MusicManager) SetMuted(muted bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.muted = muted
+	if m.player != nil {
+		if muted {
+			m.player.SetVolume(0)
+		} else {
+			m.player.SetVolume(m.volume)
+		}
+	}
+}
+
+// IsMuted reports whether the music output is currently muted.
+func (m *MusicManager) IsMuted() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.muted
 }
 
 // CurrentTrack returns the name of the currently active music lump.
@@ -167,7 +196,11 @@ func (m *MusicManager) PlayMusic(lumpName string) error {
 		return fmt.Errorf("failed to create audio player for %s: %w", upper, err)
 	}
 
-	player.SetVolume(m.volume)
+	if m.muted {
+		player.SetVolume(0)
+	} else {
+		player.SetVolume(m.volume)
+	}
 	player.Play()
 
 	m.player = player

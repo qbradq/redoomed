@@ -675,6 +675,55 @@ func TestGameControlsWeaponSwitching(t *testing.T) {
 	}
 }
 
+func TestGameControlsMouseLook(t *testing.T) {
+	controls := NewGameControlsLayer(nil)
+
+	if !controls.MouseLookEnabled() {
+		t.Error("expected mouse look to be enabled by default")
+	}
+	if controls.MouseSensitivity() != DefaultMouseSensitivity {
+		t.Errorf("expected default sensitivity %f, got %f", DefaultMouseSensitivity, controls.MouseSensitivity())
+	}
+
+	controls.SetMouseSensitivity(0.2)
+	if controls.MouseSensitivity() != 0.2 {
+		t.Errorf("expected sensitivity 0.2, got %f", controls.MouseSensitivity())
+	}
+
+	var lastTurn float64
+	called := false
+	controls.SetOnMovePlayer(func(forward, strafe, turn float64) {
+		lastTurn = turn
+		called = true
+	})
+
+	// First Update initializes prevCursorX
+	_, _ = controls.Update()
+	if !controls.hasPrevCursor {
+		t.Error("expected hasPrevCursor to be true after first Update()")
+	}
+
+	// ResetMouse clears tracking
+	controls.ResetMouse()
+	if controls.hasPrevCursor {
+		t.Error("expected hasPrevCursor to be false after ResetMouse()")
+	}
+
+	// Disable mouse look
+	controls.SetMouseLookEnabled(false)
+	if controls.MouseLookEnabled() {
+		t.Error("expected mouse look to be disabled")
+	}
+	controls.SetMouseLookEnabled(true)
+	if !controls.MouseLookEnabled() {
+		t.Error("expected mouse look to be enabled")
+	}
+
+	_ = lastTurn
+	_ = called
+}
+
+
 
 
 

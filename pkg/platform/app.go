@@ -173,7 +173,18 @@ func NewAppWithIWAD(iwadPath string) *App {
 		}
 	}
 
+	app.updateCursorMode()
 	return app
+}
+
+// updateCursorMode ensures the mouse cursor is captured when in GameMode without the console,
+// and released (visible) when in ConsoleMode, EditorMode, or any other mode.
+func (a *App) updateCursorMode() {
+	if a.currentMode == a.gameMode && a.gameMode != nil {
+		ebiten.SetCursorMode(ebiten.CursorModeCaptured)
+	} else {
+		ebiten.SetCursorMode(ebiten.CursorModeVisible)
+	}
 }
 
 // underlyingMode returns the mode that should be rendered beneath ConsoleMode.
@@ -193,10 +204,14 @@ func (a *App) ToggleConsole() {
 		if underlying := a.underlyingMode(); underlying != nil {
 			a.currentMode = underlying
 		}
+		if a.gameMode != nil && a.gameMode.GameControlsLayer() != nil {
+			a.gameMode.GameControlsLayer().ResetMouse()
+		}
 	} else {
 		a.previousMode = a.currentMode
 		a.currentMode = a.consoleMode
 	}
+	a.updateCursorMode()
 }
 
 // StartMap enters the game mode for the given map name, starts map music, and hides the console.
@@ -247,6 +262,7 @@ func (a *App) SetMode(m mode.Mode) {
 		a.previousMode = a.currentMode
 	}
 	a.currentMode = m
+	a.updateCursorMode()
 }
 
 // CurrentMode returns the active application mode.
@@ -274,6 +290,7 @@ func (a *App) Update() error {
 	if a.exitRequested {
 		return ebiten.Termination
 	}
+	a.updateCursorMode()
 	if a.currentMode != nil {
 		return a.currentMode.Update()
 	}

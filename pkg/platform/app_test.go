@@ -266,3 +266,41 @@ func TestAppConsoleOverCustomMode(t *testing.T) {
 	}
 }
 
+func TestAppCursorMode(t *testing.T) {
+	app := NewApp()
+
+	// Initial mode after autoexec is GameMode -> cursor should be captured
+	if _, ok := app.CurrentMode().(*mode.GameMode); !ok {
+		t.Fatalf("expected GameMode after autoexec, got %T", app.CurrentMode())
+	}
+	if ebiten.CursorMode() != ebiten.CursorModeCaptured {
+		t.Errorf("expected CursorModeCaptured in GameMode, got %v", ebiten.CursorMode())
+	}
+
+	// Toggle console -> cursor should be visible
+	app.ToggleConsole()
+	if ebiten.CursorMode() != ebiten.CursorModeVisible {
+		t.Errorf("expected CursorModeVisible in ConsoleMode, got %v", ebiten.CursorMode())
+	}
+
+	// Toggle console back to GameMode -> cursor should be captured again
+	app.ToggleConsole()
+	if ebiten.CursorMode() != ebiten.CursorModeCaptured {
+		t.Errorf("expected CursorModeCaptured back in GameMode, got %v", ebiten.CursorMode())
+	}
+
+	// Set to custom/editor mode -> cursor should be visible
+	editorMock := &mockMode{}
+	app.SetMode(editorMock)
+	if ebiten.CursorMode() != ebiten.CursorModeVisible {
+		t.Errorf("expected CursorModeVisible in Editor/Custom mode, got %v", ebiten.CursorMode())
+	}
+
+	// Switch back to GameMode -> cursor should be captured
+	app.SetMode(app.GameMode())
+	if ebiten.CursorMode() != ebiten.CursorModeCaptured {
+		t.Errorf("expected CursorModeCaptured when returning to GameMode, got %v", ebiten.CursorMode())
+	}
+}
+
+

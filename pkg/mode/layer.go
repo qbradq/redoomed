@@ -99,9 +99,18 @@ func (l *GameMenuLayer) SetVisible(v bool) { l.visible = v }
 
 func (l *GameMenuLayer) PreventsLowerDrawing() bool { return false }
 
-// GameControlsLayer handles gameplay inputs like movement, use actions, and automap toggle.
+const (
+	// DefaultMouseSensitivity is the default horizontal turning sensitivity per mouse cursor pixel delta.
+	DefaultMouseSensitivity = 0.15
+)
+
+// GameControlsLayer handles gameplay inputs like movement, mouse look, use actions, and automap toggle.
 type GameControlsLayer struct {
 	visible            bool
+	mouseLookEnabled   bool
+	mouseSensitivity   float64
+	prevCursorX        int
+	hasPrevCursor      bool
 	onToggleMiniMap    func()
 	onMovePlayer       func(forward, strafe, turn float64)
 	onUse              func()
@@ -111,12 +120,42 @@ type GameControlsLayer struct {
 // NewGameControlsLayer creates a new GameControlsLayer.
 func NewGameControlsLayer(onToggleMiniMap func()) *GameControlsLayer {
 	return &GameControlsLayer{
-		visible:         true,
-		onToggleMiniMap: onToggleMiniMap,
+		visible:          true,
+		mouseLookEnabled: true,
+		mouseSensitivity: DefaultMouseSensitivity,
+		onToggleMiniMap:  onToggleMiniMap,
 	}
 }
 
 func (l *GameControlsLayer) Name() string { return "Game Controls" }
+
+// MouseLookEnabled reports whether horizontal mouse look is enabled.
+func (l *GameControlsLayer) MouseLookEnabled() bool {
+	return l.mouseLookEnabled
+}
+
+// SetMouseLookEnabled enables or disables horizontal mouse look.
+func (l *GameControlsLayer) SetMouseLookEnabled(enabled bool) {
+	l.mouseLookEnabled = enabled
+	if !enabled {
+		l.hasPrevCursor = false
+	}
+}
+
+// MouseSensitivity returns the horizontal mouse look sensitivity.
+func (l *GameControlsLayer) MouseSensitivity() float64 {
+	return l.mouseSensitivity
+}
+
+// SetMouseSensitivity updates the horizontal mouse look sensitivity.
+func (l *GameControlsLayer) SetMouseSensitivity(sens float64) {
+	l.mouseSensitivity = sens
+}
+
+// ResetMouse resets mouse cursor delta tracking to prevent sudden turn jumps when activating the mode.
+func (l *GameControlsLayer) ResetMouse() {
+	l.hasPrevCursor = false
+}
 
 // SetOnToggleMiniMap updates the mini map toggle callback.
 func (l *GameControlsLayer) SetOnToggleMiniMap(fn func()) {
@@ -140,6 +179,7 @@ func (l *GameControlsLayer) SetOnSelectWeaponSlot(fn func(slot int)) {
 
 func (l *GameControlsLayer) Update() (bool, error) {
 	if !l.visible {
+		l.hasPrevCursor = false
 		return false, nil
 	}
 
@@ -219,6 +259,19 @@ func (l *GameControlsLayer) Update() (bool, error) {
 	}
 	if ebiten.IsKeyPressed(ebiten.KeyRight) {
 		turn -= turnSpeed
+	}
+
+	// Horizontal-only mouse look (yaw turning)
+	if l.mouseLookEnabled {
+		currX, _ := ebiten.CursorPosition()
+		if l.hasPrevCursor {
+			deltaX := float64(currX - l.prevCursorX)
+			if deltaX != 0 {
+				turn -= deltaX * l.mouseSensitivity
+			}
+		}
+		l.prevCursorX = currX
+		l.hasPrevCursor = true
 	}
 
 	if forward != 0 || strafe != 0 || turn != 0 {
@@ -681,38 +734,26 @@ func (l *MiniMapLayer) Draw(screen *ebiten.Image) {
 		vector.StrokeLine(screen, ix, iy-1.5, ix, iy+1.5, 1.0, itemColor, false)
 	}
 
-	// 5. Draw player green arrow
+	// 5. Draw player chunky square and view direction line
 	if l.hasPlayer {
 		px, py := worldToScreen(l.playerX, l.playerY)
 
 		// Doom angle: 0=East, 90=North, 180=West, 270=South
 		rad := l.playerAngle * math.Pi / 180.0
 		dirX := math.Cos(rad)
-		dirY := -math.Sin(rad) // Invert Y
-
-		perpX := -dirY
-		perpY := dirX
-
-		arrowLen := 6.0
-		arrowHalfW := 3.5
-
-		tipX := px + float32(dirX*arrowLen)
-		tipY := py + float32(dirY*arrowLen)
-
-		leftX := px - float32(dirX*(arrowLen*0.5)) + float32(perpX*arrowHalfW)
-		leftY := py - float32(dirY*(arrowLen*0.5)) + float32(perpY*arrowHalfW)
-
-		rightX := px - float32(dirX*(arrowLen*0.5)) - float32(perpX*arrowHalfW)
-		rightY := py - float32(dirY*(arrowLen*0.5)) - float32(perpX*arrowHalfW)
-
-		backX := px - float32(dirX*(arrowLen*0.2))
-		backY := py - float32(dirY*(arrowLen*0.2))
+		dirY := -math.Sin(rad) // Invert Y for screen space
 
 		green := gfx.EGABrightGreen
-		vector.StrokeLine(screen, leftX, leftY, tipX, tipY, 1.2, green, false)
-		vector.StrokeLine(screen, rightX, rightY, tipX, tipY, 1.2, green, false)
-		vector.StrokeLine(screen, leftX, leftY, backX, backY, 1.2, green, false)
-		vector.StrokeLine(screen, rightX, rightY, backX, backY, 1.2, green, false)
+
+		// Chunky square (4x4 pixels centered on player coordinates)
+		squareSize := float32(4.0)
+		vector.DrawFilledRect(screen, px-squareSize/2.0, py-squareSize/2.0, squareSize, squareSize, green, false)
+
+		// View direction line extending from player center
+		lineLen := 7.0
+		endX := px + float32(dirX*lineLen)
+		endY := py + float32(dirY*lineLen)
+		vector.StrokeLine(screen, px, py, endX, endY, 1.5, green, false)
 	}
 }
 

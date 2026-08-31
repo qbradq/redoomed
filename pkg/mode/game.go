@@ -171,6 +171,9 @@ func (g *GameMode) SetMapName(name string) {
 			g.levelViewLayer.SetVisible(true)
 			g.miniMapLayer.SetVisible(false)
 			g.intermissionLayer.SetVisible(false)
+			if g.gameControlsLayer != nil {
+				g.gameControlsLayer.ResetMouse()
+			}
 			g.initMapSpecials(md)
 		}
 	}
