@@ -15,36 +15,36 @@ import (
 )
 
 const (
-	// EditorBufferWidth is the logical width of the editor mode (1280).
-	EditorBufferWidth = 1280
-	// EditorBufferHeight is the logical height of the editor mode (800).
-	EditorBufferHeight = 800
+	// EditorBufferWidth is the logical width of the editor mode (640).
+	EditorBufferWidth = 640
+	// EditorBufferHeight is the logical height of the editor mode (400).
+	EditorBufferHeight = 400
 
-	// EditingWindowWidth is the width of the editing grid area (960).
-	EditingWindowWidth = 960
-	// EditingWindowHeight is the height of the editing grid area (792).
-	EditingWindowHeight = 792
+	// EditingWindowWidth is the width of the editing grid area (400).
+	EditingWindowWidth = 400
+	// EditingWindowHeight is the height of the editing grid area (392).
+	EditingWindowHeight = 392
 
-	// UserPanelX is the horizontal starting coordinate of the user panel (960).
-	UserPanelX = 960
+	// UserPanelX is the horizontal starting coordinate of the user panel (400).
+	UserPanelX = 400
 	// UserPanelY is the vertical starting coordinate of the user panel (0).
 	UserPanelY = 0
-	// UserPanelWidth is the width of the user panel (320).
-	UserPanelWidth = 320
-	// UserPanelHeight is the height of the user panel (792).
-	UserPanelHeight = 792
+	// UserPanelWidth is the width of the user panel (240).
+	UserPanelWidth = 240
+	// UserPanelHeight is the height of the user panel (392).
+	UserPanelHeight = 392
 
 	// StatusBarX is the horizontal starting coordinate of the status bar (0).
 	StatusBarX = 0
-	// StatusBarY is the vertical starting coordinate of the status bar (792).
-	StatusBarY = 792
-	// StatusBarWidth is the width of the status bar (1280).
-	StatusBarWidth = 1280
+	// StatusBarY is the vertical starting coordinate of the status bar (392).
+	StatusBarY = 392
+	// StatusBarWidth is the width of the status bar (640).
+	StatusBarWidth = 640
 	// StatusBarHeight is the height of the status bar (8).
 	StatusBarHeight = 8
 
-	// NumIconButtons is the number of 16x16 icon buttons in the top of the user panel.
-	NumIconButtons = 20
+	// NumIconButtons is the number of 16x16 icon buttons in the top of the user panel (15).
+	NumIconButtons = 15
 	// IconButtonSize is the dimension of each square icon button in pixels.
 	IconButtonSize = 16
 
@@ -71,8 +71,9 @@ type IconButton struct {
 	Tooltip string
 }
 
-// EditorMode represents the 1280x800 map editor mode.
+// EditorMode represents the 640x400 map editor mode composited to the screen.
 type EditorMode struct {
+	buffer  *ebiten.Image
 	wadFile *wad.WAD
 	font    *font.ConsoleFont
 
@@ -101,6 +102,7 @@ type EditorMode struct {
 // NewEditorMode creates and initializes a new EditorMode instance.
 func NewEditorMode(f *font.ConsoleFont, w *wad.WAD) *EditorMode {
 	ed := &EditorMode{
+		buffer:    ebiten.NewImage(EditorBufferWidth, EditorBufferHeight),
 		wadFile:   w,
 		font:      f,
 		gridSize:  DefaultGridSize,
@@ -288,8 +290,12 @@ func (e *EditorMode) Update() error {
 		e.IncreaseGridSize()
 	}
 
+	// Map cursor coordinates from 1280x800 screen space to 640x400 editor space
+	rawMx, rawMy := ebiten.CursorPosition()
+	mx := rawMx * EditorBufferWidth / 1280
+	my := rawMy * EditorBufferHeight / 800
+
 	// Zoom level adjustment with mouse wheel
-	mx, my := ebiten.CursorPosition()
 	_, wheelY := ebiten.Wheel()
 	if mx < EditingWindowWidth && my < EditingWindowHeight {
 		if wheelY > 0 {
@@ -359,22 +365,36 @@ func (e *EditorMode) Update() error {
 	return nil
 }
 
-// Draw renders the entire 1280x800 editor mode interface.
+// Draw renders the entire 640x400 editor mode interface and composites onto the screen.
 func (e *EditorMode) Draw(screen *ebiten.Image) {
-	// 1. Draw 960x792 Editing Window
-	e.drawEditingWindow(screen)
+	if e.buffer == nil {
+		e.buffer = ebiten.NewImage(EditorBufferWidth, EditorBufferHeight)
+	}
 
-	// 2. Draw 320x792 User Panel
-	e.drawUserPanel(screen)
+	// 1. Draw 400x392 Editing Window
+	e.drawEditingWindow(e.buffer)
 
-	// 3. Draw 1280x8 Status Bar
-	e.drawStatusBar(screen)
+	// 2. Draw 240x392 User Panel
+	e.drawUserPanel(e.buffer)
+
+	// 3. Draw 640x8 Status Bar
+	e.drawStatusBar(e.buffer)
+
+	// 4. Composite 640x400 editor buffer onto destination screen
+	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
+	scaleX := float64(sw) / float64(EditorBufferWidth)
+	scaleY := float64(sh) / float64(EditorBufferHeight)
+
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(scaleX, scaleY)
+	op.Filter = ebiten.FilterNearest
+	screen.DrawImage(e.buffer, op)
 }
 
 // drawEditingWindow renders the editing background and grid lines.
-func (e *EditorMode) drawEditingWindow(screen *ebiten.Image) {
+func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 	// Fill editing area background with black
-	vector.DrawFilledRect(screen, 0, 0, EditingWindowWidth, EditingWindowHeight, gfx.EGABlack, false)
+	vector.DrawFilledRect(dst, 0, 0, EditingWindowWidth, EditingWindowHeight, gfx.EGABlack, false)
 
 	// Compute visible world bounds
 	minWx, maxWy := e.ScreenToWorld(0, 0)
@@ -395,7 +415,7 @@ func (e *EditorMode) drawEditingWindow(screen *ebiten.Image) {
 			wx := float64(k) * gridStep
 			sx, _ := e.WorldToScreen(wx, 0)
 			if sx >= 0 && sx < EditingWindowWidth {
-				vector.StrokeLine(screen, float32(sx), 0, float32(sx), float32(EditingWindowHeight), 1.0, gridColor, false)
+				vector.StrokeLine(dst, float32(sx), 0, float32(sx), float32(EditingWindowHeight), 1.0, gridColor, false)
 			}
 		}
 
@@ -407,18 +427,18 @@ func (e *EditorMode) drawEditingWindow(screen *ebiten.Image) {
 			wy := float64(m) * gridStep
 			_, sy := e.WorldToScreen(0, wy)
 			if sy >= 0 && sy < EditingWindowHeight {
-				vector.StrokeLine(screen, 0, float32(sy), float32(EditingWindowWidth), float32(sy), 1.0, gridColor, false)
+				vector.StrokeLine(dst, 0, float32(sy), float32(EditingWindowWidth), float32(sy), 1.0, gridColor, false)
 			}
 		}
 	}
 }
 
-// drawUserPanel renders the 320x792 dark gray panel with 20x1 16x16 icon buttons at the top.
-func (e *EditorMode) drawUserPanel(screen *ebiten.Image) {
+// drawUserPanel renders the 240x392 dark gray panel with 15x1 16x16 icon buttons at the top.
+func (e *EditorMode) drawUserPanel(dst *ebiten.Image) {
 	// Fill user panel background with dark gray
-	vector.DrawFilledRect(screen, UserPanelX, UserPanelY, UserPanelWidth, UserPanelHeight, gfx.EGADarkGray, false)
+	vector.DrawFilledRect(dst, UserPanelX, UserPanelY, UserPanelWidth, UserPanelHeight, gfx.EGADarkGray, false)
 
-	// Draw 20x1 array of 16x16 icon buttons
+	// Draw 15x1 array of 16x16 icon buttons
 	btnBorderColor := color.RGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xFF}
 	btnHoverColor := color.RGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xFF}
 	btnNormalColor := color.RGBA{R: 0x44, G: 0x44, B: 0x44, A: 0xFF}
@@ -433,17 +453,17 @@ func (e *EditorMode) drawUserPanel(screen *ebiten.Image) {
 		}
 
 		// Button background
-		vector.DrawFilledRect(screen, bx+1, by+1, IconButtonSize-2, IconButtonSize-2, btnBg, false)
+		vector.DrawFilledRect(dst, bx+1, by+1, IconButtonSize-2, IconButtonSize-2, btnBg, false)
 
 		// Button border
-		vector.StrokeRect(screen, bx, by, IconButtonSize, IconButtonSize, 1.0, btnBorderColor, false)
+		vector.StrokeRect(dst, bx, by, IconButtonSize, IconButtonSize, 1.0, btnBorderColor, false)
 	}
 }
 
-// drawStatusBar renders the 1280x8 dark blue status bar with yellow IWAD/PWAD and right-justified Grid/Zoom text.
-func (e *EditorMode) drawStatusBar(screen *ebiten.Image) {
+// drawStatusBar renders the 640x8 dark blue status bar with yellow IWAD/PWAD and right-justified Grid/Zoom text.
+func (e *EditorMode) drawStatusBar(dst *ebiten.Image) {
 	// Fill status bar background with dark blue
-	vector.DrawFilledRect(screen, StatusBarX, StatusBarY, StatusBarWidth, StatusBarHeight, gfx.EGADarkBlue, false)
+	vector.DrawFilledRect(dst, StatusBarX, StatusBarY, StatusBarWidth, StatusBarHeight, gfx.EGADarkBlue, false)
 
 	if e.font == nil {
 		return
@@ -455,13 +475,13 @@ func (e *EditorMode) drawStatusBar(screen *ebiten.Image) {
 		iwadName = e.wadFile.Filename()
 	}
 	leftText := fmt.Sprintf("IWAD=%s  PWAD=NONE", iwadName)
-	e.font.DrawText(screen, leftText, StatusBarX, StatusBarY, gfx.EGABrightYellow)
+	e.font.DrawText(dst, leftText, StatusBarX, StatusBarY, gfx.EGABrightYellow)
 
 	// 2. Right-justified: Grid and Zoom settings in fixed-width fields
 	rightText := fmt.Sprintf("GRID: %3d  ZOOM: %5.2fx", e.gridSize, e.zoomLevel)
 	rightTextWidth, _ := e.font.MeasureText(rightText)
 	rightX := StatusBarWidth - rightTextWidth
 	if rightX > 0 {
-		e.font.DrawText(screen, rightText, rightX, StatusBarY, gfx.EGABrightYellow)
+		e.font.DrawText(dst, rightText, rightX, StatusBarY, gfx.EGABrightYellow)
 	}
 }

@@ -222,3 +222,25 @@ func TestEditorDrawAndStatusBar(t *testing.T) {
 		t.Errorf("expected right-justified text lengths to match for fixed-width formatting: %q vs %q", rightText1, rightText2)
 	}
 }
+
+func TestEditorLayoutDimensions(t *testing.T) {
+	if EditorBufferWidth != 640 || EditorBufferHeight != 400 {
+		t.Errorf("expected 640x400 base resolution, got %dx%d", EditorBufferWidth, EditorBufferHeight)
+	}
+	if UserPanelWidth != 240 || UserPanelHeight != 392 {
+		t.Errorf("expected 240x392 user panel, got %dx%d", UserPanelWidth, UserPanelHeight)
+	}
+	if EditingWindowWidth != 400 || EditingWindowHeight != 392 {
+		t.Errorf("expected 400x392 editing window, got %dx%d", EditingWindowWidth, EditingWindowHeight)
+	}
+	if StatusBarWidth != 640 || StatusBarHeight != 8 || StatusBarY != 392 {
+		t.Errorf("expected 640x8 status bar at Y=392, got %dx%d at Y=%d", StatusBarWidth, StatusBarHeight, StatusBarY)
+	}
+	if NumIconButtons != 15 {
+		t.Errorf("expected 15 icon buttons, got %d", NumIconButtons)
+	}
+	if NumIconButtons*IconButtonSize != UserPanelWidth {
+		t.Errorf("expected 15 buttons of 16px to equal user panel width of %d, got %d", UserPanelWidth, NumIconButtons*IconButtonSize)
+	}
+}
+
