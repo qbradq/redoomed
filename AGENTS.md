@@ -56,8 +56,13 @@ Welcome to **ReDoomEd**! This document provides essential architectural context,
 │   │   ├── texture.go            # TextureManager, TEXTURE1/2, PNAMES, flats, PLAYPAL, COLORMAP
 │   │   └── font.go               # HUDFont (STCFNxxx patches converted to ebiten.Image)
 │   ├── script/                   # Tengo scripting language integration
-│   │   ├── repl.go               # Interactive REPL, symbol table, stdout redirection, game module
-│   │   └── repl_test.go
+│   │   ├── repl.go               # Interactive REPL, symbol table, stdout redirection, game & map module
+│   │   ├── repl_test.go
+│   │   ├── map_module.go         # ID-based "map" module exposing geometry, sectors, lines, tags, neighbor queries
+│   │   ├── map_test.go
+│   │   ├── cache.go              # ScriptCache for caching compiled scripts & line special dispatchers
+│   │   ├── cache_test.go
+│   │   └── line_special_test.go
 │   ├── font/                     # Console text rendering
 │   │   ├── font.go               # 8x8 fixed-width ConsoleFont using unscii-8.ttf via text/v2
 │   │   └── font_test.go
@@ -67,7 +72,9 @@ Welcome to **ReDoomEd**! This document provides essential architectural context,
 │       ├── data.go               # FS embed definition for fonts/ and scripts/
 │       ├── fonts/unscii-8.ttf    # Embedded 8x8 bitmapped TrueType font
 │       └── scripts/
-│           └── autoexec.tengo    # Startup Tengo script (welcome banner + game.StartMap("MAP01"))
+│           ├── autoexec.tengo    # Startup Tengo script (welcome banner + game.StartMap("MAP01"))
+│           └── lines/            # Line special scripts (line_nnn.tengo)
+│               └── line_001.tengo # Line special 1 (DR Open Door, Wait 4s, Close)
 ```
 
 ---
@@ -82,7 +89,7 @@ Welcome to **ReDoomEd**! This document provides essential architectural context,
 - **`GameMode` Layer Stack** (ordered top-to-bottom):
   1. `CommonLayer`: Handles engine-level hotkeys (e.g. console toggle).
   2. `GameMenuLayer`: Pause and options menu (hidden by default).
-  3. `GameControlsLayer`: Gameplay inputs (WASD/Arrows, Shift run, Q/E turn, Tab automap toggle).
+  3. `GameControlsLayer`: Gameplay inputs (WASD movement, Left/Right arrow turn, Shift run, E/Spacebar use, Tab automap toggle).
   4. `HUDLayer`: Renders status bar (`STBAR` patch, 320x32) at bottom of screen.
   5. `MiniMapLayer`: 2D vector automap with line flag colors and player arrow; supports mouse wheel and Ctrl+/- zooming. Occludes lower layers when active.
   6. `LevelViewLayer`: 2.5D software-rendered level view via `render.Renderer`. Occludes lower layers when active.
@@ -95,6 +102,7 @@ Welcome to **ReDoomEd**! This document provides essential architectural context,
 - **Low Ceiling Clearance**: Prevents actors from moving into or under openings shorter than the actor's height (`CeilingZ - FloorZ < Height` or `CeilingZ - Z < Height`).
 - **Floor Crack Avoidance**: Multi-point bounding box sampling queries all overlapping sectors and adopts `highestFloor`, ensuring actors standing over small cracks or trenches remain supported by adjacent floors.
 - **Wall Sliding (`SlideMove`)**: Decomposes blocked diagonal vectors into unconstrained axial/tangential components for responsive movement along solid geometry.
+- **Line Interaction (`UseLine`)**: Casts an interaction ray from the player position in their facing direction (`DefaultUseRange = 64.0`) to find the nearest usable linedef.
 
 ### C. 2.5D Software Renderer (`pkg/render`)
 - **Internal Resolution**: 320x168 active 2.5D viewport, rendered into a 320x200 buffer (`DefaultBufferHeight`).

@@ -8,7 +8,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 
 	"github.com/qbradq/redoomed/pkg/audio"
-	"github.com/qbradq/redoomed/pkg/data"
 	"github.com/qbradq/redoomed/pkg/font"
 	"github.com/qbradq/redoomed/pkg/gfx"
 	"github.com/qbradq/redoomed/pkg/mode"
@@ -108,11 +107,22 @@ func NewAppWithIWAD(iwadPath string) *App {
 	app.gameMode = mode.NewGameMode("", app.wadFile, func() {
 		app.ToggleConsole()
 	})
+	app.gameMode.SetOnLog(func(msg string) {
+		app.consoleMode.PrintColored(msg, gfx.EGABrightCyan)
+	})
 
 	// Initialize Tengo REPL with exit, start_map, and music handlers
 	repl := script.NewREPL(func() {
 		app.exitRequested = true
-	}, nil)
+	}, func(msg string) {
+		app.consoleMode.PrintColored(msg, gfx.EGABrightRed)
+	})
+	repl.SetMapDataProvider(func() *wad.MapData {
+		if app.gameMode != nil {
+			return app.gameMode.MapData()
+		}
+		return nil
+	})
 	repl.SetStartMapFunc(func(mapName string) {
 		app.StartMap(mapName)
 	})
@@ -131,12 +141,16 @@ func NewAppWithIWAD(iwadPath string) *App {
 		return app.musicMgr.CurrentTrack()
 	})
 
+	app.gameMode.SetOnTriggerLineSpecial(func(special, lineID, secID, thingID, tag int) {
+		repl.TriggerLineSpecial(special, lineID, secID, thingID, tag)
+	})
+
 	app.consoleMode.SetREPL(repl)
 	app.currentMode = app.consoleMode
 
 	// Run the game logic main entry point script (autoexec.tengo)
 	scriptName := "scripts/autoexec.tengo"
-	autoexecScript, err := data.FS.ReadFile(scriptName)
+	autoexecScript, err := repl.Cache().GetScript(scriptName)
 	if err != nil {
 		app.consoleMode.PrintColored(fmt.Sprintf("Failed to read %s: %v", scriptName, err), gfx.EGABrightRed)
 		log.Printf("Warning: failed to read %s: %v", scriptName, err)

@@ -1,10 +1,13 @@
 package mode
 
 import (
+	"fmt"
 	"image/color"
+	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
+	"github.com/qbradq/redoomed/pkg/physics"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
 
@@ -21,6 +24,8 @@ type GameMode struct {
 	wadFile *wad.WAD
 	buffer  *ebiten.Image
 	bgColor color.RGBA
+	onLog   func(string)
+	onTriggerLineSpecial func(special, lineID, secID, thingID, tag int)
 
 	// Ordered top to bottom
 	layers []Layer
@@ -95,7 +100,7 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 		intermission,
 	}
 
-	return &GameMode{
+	g := &GameMode{
 		mapName:           mapName,
 		wadFile:           w,
 		buffer:            ebiten.NewImage(GameBufferWidth, GameBufferHeight),
@@ -109,6 +114,12 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 		levelViewLayer:    levelView,
 		intermissionLayer: intermission,
 	}
+
+	controls.SetOnUse(func() {
+		g.Use()
+	})
+
+	return g
 }
 
 // MapName returns the active map name.
@@ -186,6 +197,54 @@ func (g *GameMode) SetOnToggleConsole(fn func()) {
 	if g.commonLayer != nil {
 		g.commonLayer.SetOnToggleConsole(fn)
 	}
+}
+
+// SetOnLog sets the callback for logging game events (e.g. debug messages).
+func (g *GameMode) SetOnLog(fn func(string)) {
+	g.onLog = fn
+}
+
+// SetOnTriggerLineSpecial sets the callback when a line special is triggered.
+func (g *GameMode) SetOnTriggerLineSpecial(fn func(special, lineID, secID, thingID, tag int)) {
+	g.onTriggerLineSpecial = fn
+}
+
+// Use triggers a line interaction check in front of the player, prints a debug message,
+// and invokes any associated line special function.
+func (g *GameMode) Use() (int, *wad.Linedef, bool) {
+	mapData := g.MapData()
+	if mapData == nil || g.levelViewLayer == nil {
+		return -1, nil, false
+	}
+	actor := g.levelViewLayer.Player()
+	if actor == nil {
+		return -1, nil, false
+	}
+
+	lineIdx, ld, dist, hit := physics.UseLine(mapData, actor, physics.DefaultUseRange)
+	if hit && ld != nil {
+		msg := fmt.Sprintf("Use: line %d (Special: %d, Tag: %d, Flags: 0x%04X, Dist: %.1f)", lineIdx, ld.Special, ld.Tag, ld.Flags, dist)
+		log.Print(msg)
+		if g.onLog != nil {
+			g.onLog(msg)
+		}
+		if ld.Special != 0 && g.onTriggerLineSpecial != nil {
+			secID := -1
+			if ld.RightSide != 0xFFFF && int(ld.RightSide) < len(mapData.Sidedefs) {
+				secID = int(mapData.Sidedefs[ld.RightSide].Sector)
+			}
+			thingID := 0
+			g.onTriggerLineSpecial(int(ld.Special), lineIdx, secID, thingID, int(ld.Tag))
+		}
+		return lineIdx, ld, true
+	}
+
+	msg := "Use: no line in range"
+	log.Print(msg)
+	if g.onLog != nil {
+		g.onLog(msg)
+	}
+	return -1, nil, false
 }
 
 // Update advances the gameplay simulation state and propagates input top-to-bottom.

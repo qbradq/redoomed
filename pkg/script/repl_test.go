@@ -2,6 +2,8 @@ package script
 
 import (
 	"testing"
+
+	"github.com/d5/tengo/v2"
 )
 
 func TestREPLEvaluation(t *testing.T) {
@@ -37,6 +39,60 @@ func TestREPLEvaluation(t *testing.T) {
 		t.Error("expected syntax error on invalid syntax")
 	}
 }
+
+func TestTengoExport(t *testing.T) {
+	scriptSrc := `
+fn := func(line_id, sec_id, thing_id, tag) {
+	return line_id + sec_id + thing_id + tag
+}
+export fn
+`
+	modMap := tengo.NewModuleMap()
+	modMap.AddSourceModule("line_001", []byte(scriptSrc))
+
+	callerSrc := `
+line := import("line_001")
+res := line(line_id, sec_id, thing_id, tag)
+`
+	s := tengo.NewScript([]byte(callerSrc))
+	s.SetImports(modMap)
+	s.Add("line_id", 0)
+	s.Add("sec_id", 0)
+	s.Add("thing_id", 0)
+	s.Add("tag", 0)
+
+	compiled, err := s.Compile()
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	// Call 1
+	c1 := compiled.Clone()
+	_ = c1.Set("line_id", 10)
+	_ = c1.Set("sec_id", 20)
+	_ = c1.Set("thing_id", 1)
+	_ = c1.Set("tag", 5)
+	if err := c1.Run(); err != nil {
+		t.Fatalf("c1 Run failed: %v", err)
+	}
+	if c1.Get("res").Int() != 36 {
+		t.Fatalf("expected 36, got %v", c1.Get("res"))
+	}
+
+	// Call 2 (reusing compiled with different args)
+	c2 := compiled.Clone()
+	_ = c2.Set("line_id", 100)
+	_ = c2.Set("sec_id", 200)
+	_ = c2.Set("thing_id", 2)
+	_ = c2.Set("tag", 10)
+	if err := c2.Run(); err != nil {
+		t.Fatalf("c2 Run failed: %v", err)
+	}
+	if c2.Get("res").Int() != 312 {
+		t.Fatalf("expected 312, got %v", c2.Get("res"))
+	}
+}
+
 
 func TestGameExit(t *testing.T) {
 	exitCalled := false

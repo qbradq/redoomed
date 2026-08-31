@@ -98,11 +98,12 @@ func (l *GameMenuLayer) SetVisible(v bool) { l.visible = v }
 
 func (l *GameMenuLayer) PreventsLowerDrawing() bool { return false }
 
-// GameControlsLayer handles gameplay inputs like movement and automap toggle.
+// GameControlsLayer handles gameplay inputs like movement, use actions, and automap toggle.
 type GameControlsLayer struct {
 	visible         bool
 	onToggleMiniMap func()
 	onMovePlayer    func(forward, strafe, turn float64)
+	onUse           func()
 }
 
 // NewGameControlsLayer creates a new GameControlsLayer.
@@ -125,6 +126,11 @@ func (l *GameControlsLayer) SetOnMovePlayer(fn func(forward, strafe, turn float6
 	l.onMovePlayer = fn
 }
 
+// SetOnUse updates the player use action callback.
+func (l *GameControlsLayer) SetOnUse(fn func()) {
+	l.onUse = fn
+}
+
 func (l *GameControlsLayer) Update() (bool, error) {
 	if !l.visible {
 		return false, nil
@@ -137,6 +143,14 @@ func (l *GameControlsLayer) Update() (bool, error) {
 			l.onToggleMiniMap()
 		}
 		return true, nil
+	}
+
+	// Use action (E or Spacebar)
+	if inpututil.IsKeyJustPressed(ebiten.KeyE) || inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		if l.onUse != nil {
+			l.onUse()
+		}
+		consumed = true
 	}
 
 	// Player movement inputs (WASD / Arrows)
@@ -166,10 +180,10 @@ func (l *GameControlsLayer) Update() (bool, error) {
 		strafe += moveSpeed
 	}
 
-	if ebiten.IsKeyPressed(ebiten.KeyQ) || ebiten.IsKeyPressed(ebiten.KeyLeft) {
+	if ebiten.IsKeyPressed(ebiten.KeyLeft) {
 		turn += turnSpeed
 	}
-	if ebiten.IsKeyPressed(ebiten.KeyE) || ebiten.IsKeyPressed(ebiten.KeyRight) {
+	if ebiten.IsKeyPressed(ebiten.KeyRight) {
 		turn -= turnSpeed
 	}
 

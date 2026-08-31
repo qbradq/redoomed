@@ -1,0 +1,71 @@
+fmt := import("fmt")
+map := import("map")
+times := import("times")
+
+// active_doors tracks sectors currently moving to prevent re-trigger conflicts
+active_doors := {}
+
+open_and_close_door := func(sec_id) {
+	key := string(sec_id)
+	if active_doors[key] {
+		return
+	}
+	active_doors[key] = true
+
+	sec := map.get_sector(sec_id)
+	if sec == undefined {
+		active_doors[key] = false
+		return
+	}
+
+	dest_ceil := map.get_lowest_adjacent_ceiling(sec_id) - 4
+	orig_ceil := sec.floor_height
+
+	// 1. Raise door ceiling to (lowest adjacent ceiling - 4)
+	for sec.ceiling_height < dest_ceil {
+		new_h := sec.ceiling_height + 2
+		if new_h > dest_ceil {
+			new_h = dest_ceil
+		}
+		map.set_sector_ceiling_height(sec_id, new_h)
+		times.sleep(28 * times.millisecond)
+		sec = map.get_sector(sec_id)
+	}
+
+	// 2. Wait 4 seconds
+	times.sleep(4000 * times.millisecond)
+
+	// 3. Lower door ceiling back to floor height
+	for sec.ceiling_height > orig_ceil {
+		new_h := sec.ceiling_height - 2
+		if new_h < orig_ceil {
+			new_h = orig_ceil
+		}
+		map.set_sector_ceiling_height(sec_id, new_h)
+		times.sleep(28 * times.millisecond)
+		sec = map.get_sector(sec_id)
+	}
+
+	active_doors[key] = false
+}
+
+// Line special 1: DR Open Door, Wait 4s, Close
+line_special_001 := func(line_id, sec_id, thing_id, tag) {
+	if tag != 0 {
+		sec_ids := map.find_sectors_by_tag(tag)
+		for s in sec_ids {
+			open_and_close_door(s)
+		}
+	} else {
+		target := sec_id
+		line := map.get_line(line_id)
+		if line != undefined && line.back_sector >= 0 {
+			target = line.back_sector
+		}
+		if target >= 0 {
+			open_and_close_door(target)
+		}
+	}
+}
+
+export line_special_001

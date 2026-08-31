@@ -9,29 +9,33 @@ import (
 	"github.com/d5/tengo/v2"
 	"github.com/d5/tengo/v2/parser"
 	"github.com/d5/tengo/v2/stdlib"
+
+	"github.com/qbradq/redoomed/pkg/wad"
 )
 
 const resultVarName = "__repl_res__"
 
 // REPL manages an interactive Tengo scripting environment with persistent state.
 type REPL struct {
-	mu          sync.Mutex
-	modules     *tengo.ModuleMap
-	symbolTable *tengo.SymbolTable
-	globals     []tengo.Object
-	resIndex          int
-	onExit            func()
-	onStartMap        func(string)
-	onPlayMusic       func(string)
-	onStopMusic       func()
-	onSetMusicVolume  func(float64)
-	onGetMusicTrack   func() string
-	printFunc         func(string)
+	mu               sync.Mutex
+	modules          *tengo.ModuleMap
+	symbolTable      *tengo.SymbolTable
+	globals          []tengo.Object
+	resIndex         int
+	cache            *ScriptCache
+	onExit           func()
+	onStartMap       func(string)
+	onPlayMusic      func(string)
+	onStopMusic      func()
+	onSetMusicVolume func(float64)
+	onGetMusicTrack  func() string
+	onGetMapData     func() *wad.MapData
+	printFunc        func(string)
 }
 
 // NewREPL creates a new Tengo REPL environment.
 // It registers standard library modules, replaces "fmt" with one that redirects to printFunc,
-// and registers the custom "game" module.
+// and registers the custom "game" and "map" modules.
 func NewREPL(onExit func(), printFunc func(string)) *REPL {
 	r := &REPL{
 		symbolTable: tengo.NewSymbolTable(),
@@ -147,8 +151,56 @@ func NewREPL(onExit func(), printFunc func(string)) *REPL {
 	r.modules = stdlib.GetModuleMap(stdlib.AllModuleNames()...)
 	r.modules.AddBuiltinModule("game", gameModule)
 	r.modules.AddBuiltinModule("fmt", r.createFmtModule())
+	r.modules.AddBuiltinModule("map", createMapModule(func() *wad.MapData {
+		if r.onGetMapData != nil {
+			return r.onGetMapData()
+		}
+		return nil
+	}))
+
+	r.cache = NewScriptCache(r.modules)
+	if printFunc != nil {
+		r.cache.SetOnError(func(err error) {
+			printFunc(fmt.Sprintf("Script error: %v", err))
+		})
+	}
 
 	return r
+}
+
+// SetMapDataProvider updates the map data provider callback for the "map" module.
+func (r *REPL) SetMapDataProvider(fn func() *wad.MapData) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onGetMapData = fn
+}
+
+// Cache returns the script cache instance.
+func (r *REPL) Cache() *ScriptCache {
+	return r.cache
+}
+
+// HasLineSpecial checks if a line special script is defined.
+func (r *REPL) HasLineSpecial(special int) bool {
+	if r.cache == nil {
+		return false
+	}
+	return r.cache.HasLineSpecial(special)
+}
+
+// TriggerLineSpecial executes a line special asynchronously in a background goroutine.
+func (r *REPL) TriggerLineSpecial(special, lineID, secID, thingID, tag int) {
+	if r.cache != nil {
+		r.cache.ExecuteLineSpecial(special, lineID, secID, thingID, tag)
+	}
+}
+
+// TriggerLineSpecialSync executes a line special synchronously.
+func (r *REPL) TriggerLineSpecialSync(special, lineID, secID, thingID, tag int) error {
+	if r.cache == nil {
+		return fmt.Errorf("script cache not initialized")
+	}
+	return r.cache.ExecuteLineSpecialSync(special, lineID, secID, thingID, tag)
 }
 
 // SetPlayMusicFunc updates the music playback callback.
@@ -191,6 +243,11 @@ func (r *REPL) SetPrintFunc(fn func(string)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.printFunc = fn
+	if r.cache != nil && fn != nil {
+		r.cache.SetOnError(func(err error) {
+			fn(fmt.Sprintf("Script error: %v", err))
+		})
+	}
 }
 
 // createFmtModule creates a Tengo module that redirects all console printing to r.printFunc.

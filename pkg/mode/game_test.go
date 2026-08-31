@@ -335,3 +335,107 @@ func TestMiniMapZoomControls(t *testing.T) {
 		t.Errorf("expected invisible layer Update to return false, nil; got %v, %v", consumed, err)
 	}
 }
+
+func TestGameControlsOnUse(t *testing.T) {
+	controls := NewGameControlsLayer(nil)
+	used := false
+	controls.SetOnUse(func() {
+		used = true
+	})
+
+	if controls.onUse == nil {
+		t.Fatal("expected onUse to be set")
+	}
+
+	controls.onUse()
+	if !used {
+		t.Error("expected used to be true after onUse invocation")
+	}
+}
+
+func TestGameModeUse(t *testing.T) {
+	gm := NewGameMode("", nil, nil)
+	var loggedMsg string
+	gm.SetOnLog(func(msg string) {
+		loggedMsg = msg
+	})
+
+	// Without map data, Use returns false and no line
+	idx, ld, hit := gm.Use()
+	if hit || idx != -1 || ld != nil {
+		t.Errorf("expected no hit without map, got %v, %d, %v", hit, idx, ld)
+	}
+
+	// Setup mock map data and player
+	mapData := &wad.MapData{
+		Vertexes: []wad.Vertex{
+			{X: 0, Y: 30},
+			{X: 100, Y: 30},
+		},
+		Linedefs: []wad.Linedef{
+			{
+				V1:      0,
+				V2:      1,
+				Flags:   wad.LinedefBlocking,
+				Special: 11, // S1 Exit
+				Tag:     42,
+			},
+		},
+	}
+	gm.LevelViewLayer().SetMapData(mapData)
+	gm.LevelViewLayer().SetCamera(50, 0, 41, 90) // Facing North towards line at Y=30
+
+	idx, ld, hit = gm.Use()
+	if !hit {
+		t.Fatalf("expected gm.Use() to hit linedef")
+	}
+	if idx != 0 {
+		t.Errorf("expected line idx 0, got %d", idx)
+	}
+	if ld == nil || ld.Special != 11 || ld.Tag != 42 {
+		t.Errorf("expected Special=11, Tag=42, got %+v", ld)
+	}
+	if loggedMsg == "" {
+		t.Errorf("expected loggedMsg to be populated via SetOnLog callback")
+	}
+}
+
+func TestGameModeTriggerLineSpecial(t *testing.T) {
+	gm := NewGameMode("", nil, nil)
+	var triggeredSpecial, triggeredLine, triggeredTag int
+	gm.SetOnTriggerLineSpecial(func(special, lineID, secID, thingID, tag int) {
+		triggeredSpecial = special
+		triggeredLine = lineID
+		triggeredTag = tag
+	})
+
+	mapData := &wad.MapData{
+		Vertexes: []wad.Vertex{
+			{X: 0, Y: 20},
+			{X: 100, Y: 20},
+		},
+		Linedefs: []wad.Linedef{
+			{
+				V1:      0,
+				V2:      1,
+				Flags:   wad.LinedefBlocking,
+				Special: 1, // DR Door
+				Tag:     5,
+			},
+		},
+	}
+	gm.LevelViewLayer().SetMapData(mapData)
+	gm.LevelViewLayer().SetCamera(50, 0, 41, 90)
+
+	_, _, hit := gm.Use()
+	if !hit {
+		t.Fatalf("expected Use to hit line")
+	}
+
+	if triggeredSpecial != 1 || triggeredLine != 0 || triggeredTag != 5 {
+		t.Errorf("expected special=1, line=0, tag=5, got special=%d, line=%d, tag=%d",
+			triggeredSpecial, triggeredLine, triggeredTag)
+	}
+}
+
+
