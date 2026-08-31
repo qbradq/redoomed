@@ -10,6 +10,7 @@ import (
 	"github.com/d5/tengo/v2/parser"
 	"github.com/d5/tengo/v2/stdlib"
 
+	"github.com/qbradq/redoomed/pkg/player"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
 
@@ -30,6 +31,7 @@ type REPL struct {
 	onSetMusicVolume func(float64)
 	onGetMusicTrack  func() string
 	onGetMapData     func() *wad.MapData
+	onGetPlayerStats func() *player.PlayerStats
 	printFunc        func(string)
 }
 
@@ -157,6 +159,12 @@ func NewREPL(onExit func(), printFunc func(string)) *REPL {
 		}
 		return nil
 	}))
+	r.modules.AddBuiltinModule("player", createPlayerModule(func() *player.PlayerStats {
+		if r.onGetPlayerStats != nil {
+			return r.onGetPlayerStats()
+		}
+		return nil
+	}))
 
 	r.cache = NewScriptCache(r.modules)
 	if printFunc != nil {
@@ -173,6 +181,13 @@ func (r *REPL) SetMapDataProvider(fn func() *wad.MapData) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.onGetMapData = fn
+}
+
+// SetPlayerStatsProvider updates the player stats provider callback for the "player" module.
+func (r *REPL) SetPlayerStatsProvider(fn func() *player.PlayerStats) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onGetPlayerStats = fn
 }
 
 // Cache returns the script cache instance.

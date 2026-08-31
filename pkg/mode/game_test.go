@@ -7,6 +7,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 
+	"github.com/qbradq/redoomed/pkg/player"
 	"github.com/qbradq/redoomed/pkg/render"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
@@ -573,6 +574,107 @@ func TestGameModeSimulatesGravityDuringMovement(t *testing.T) {
 		t.Errorf("expected camera Z to follow gravity to 140.0 during GameMode.Update(), got %f", gm.levelViewLayer.Camera().Z)
 	}
 }
+
+func TestHUDLayerWithPlayerStats(t *testing.T) {
+	gm := NewGameMode("", nil, nil)
+	if gm.PlayerStats() == nil {
+		t.Fatal("expected PlayerStats to be initialized in GameMode")
+	}
+
+	hud := gm.HUDLayer()
+	if hud == nil {
+		t.Fatal("expected HUDLayer to not be nil")
+	}
+	if hud.PlayerStats() != gm.PlayerStats() {
+		t.Error("expected HUDLayer.PlayerStats to match GameMode.PlayerStats")
+	}
+
+	// Create test screen
+	screen := ebiten.NewImage(GameBufferWidth, GameBufferHeight)
+
+	// Create HUDAssets with placeholder images
+	assets := &HUDAssets{
+		STBAR:       ebiten.NewImage(320, 32),
+		STARMS:      ebiten.NewImage(40, 32),
+		TallMinus:   ebiten.NewImage(9, 16),
+		TallPercent: ebiten.NewImage(9, 16),
+		Faces:       make(map[string]*ebiten.Image),
+	}
+	for i := 0; i <= 9; i++ {
+		assets.TallNums[i] = ebiten.NewImage(9, 16)
+		assets.SmallNums[i] = ebiten.NewImage(4, 6)
+		assets.GrayNums[i] = ebiten.NewImage(4, 6)
+	}
+	for i := 0; i <= 8; i++ {
+		assets.Keys[i] = ebiten.NewImage(8, 5)
+	}
+	assets.Faces["STFST00"] = ebiten.NewImage(24, 29)
+	assets.Faces["STFOUCH0"] = ebiten.NewImage(24, 29)
+	assets.Faces["STFEVL0"] = ebiten.NewImage(24, 29)
+
+	hud.SetAssets(assets)
+	if hud.Assets() != assets {
+		t.Error("expected SetAssets to update assets")
+	}
+
+	// Modify player stats
+	ps := gm.PlayerStats()
+	ps.Health = 75
+	ps.Armor = 50
+	ps.ArmorType = 1
+	ps.GiveWeapon(player.WeaponShotgun)
+	ps.GiveKey(player.KeyBlueCard)
+	ps.GiveKey(player.KeyRedSkull)
+
+	// Draw HUD layer onto screen
+	hud.Draw(screen)
+
+	// Test Update
+	_, err := hud.Update()
+	if err != nil {
+		t.Fatalf("unexpected error updating HUDLayer: %v", err)
+	}
+	if ps.TotalTics == 0 {
+		t.Error("expected HUDLayer.Update to advance player stats TotalTics")
+	}
+}
+
+func TestGameControlsWeaponSwitching(t *testing.T) {
+	gm := NewGameMode("", nil, nil)
+	ps := gm.PlayerStats()
+
+	// Initially player has Fist (1) and Pistol (2)
+	if ps.ReadyWeapon != player.WeaponPistol {
+		t.Errorf("expected initial weapon Pistol, got %v", ps.ReadyWeapon)
+	}
+
+	// Give Shotgun (slot 3) and Plasma (slot 6)
+	ps.GiveWeapon(player.WeaponShotgun)
+	ps.GiveWeapon(player.WeaponPlasma)
+
+	if gm.gameControlsLayer.onSelectWeaponSlot == nil {
+		t.Fatal("expected onSelectWeaponSlot callback to be registered")
+	}
+
+	// Switch to slot 3
+	gm.gameControlsLayer.onSelectWeaponSlot(3)
+	if ps.ReadyWeapon != player.WeaponShotgun {
+		t.Errorf("expected slot 3 switch to select Shotgun, got %v", ps.ReadyWeapon)
+	}
+
+	// Switch to slot 6
+	gm.gameControlsLayer.onSelectWeaponSlot(6)
+	if ps.ReadyWeapon != player.WeaponPlasma {
+		t.Errorf("expected slot 6 switch to select Plasma, got %v", ps.ReadyWeapon)
+	}
+
+	// Switch to slot 2 (Pistol)
+	gm.gameControlsLayer.onSelectWeaponSlot(2)
+	if ps.ReadyWeapon != player.WeaponPistol {
+		t.Errorf("expected slot 2 switch to select Pistol, got %v", ps.ReadyWeapon)
+	}
+}
+
 
 
 

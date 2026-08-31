@@ -11,6 +11,7 @@ import (
 	"github.com/qbradq/redoomed/pkg/font"
 	"github.com/qbradq/redoomed/pkg/gfx"
 	"github.com/qbradq/redoomed/pkg/mode"
+	"github.com/qbradq/redoomed/pkg/player"
 	"github.com/qbradq/redoomed/pkg/script"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
@@ -120,6 +121,12 @@ func NewAppWithIWAD(iwadPath string) *App {
 	repl.SetMapDataProvider(func() *wad.MapData {
 		if app.gameMode != nil {
 			return app.gameMode.MapData()
+		}
+		return nil
+	})
+	repl.SetPlayerStatsProvider(func() *player.PlayerStats {
+		if app.gameMode != nil {
+			return app.gameMode.PlayerStats()
 		}
 		return nil
 	})

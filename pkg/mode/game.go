@@ -8,6 +8,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 
 	"github.com/qbradq/redoomed/pkg/physics"
+	"github.com/qbradq/redoomed/pkg/player"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
 
@@ -27,6 +28,8 @@ type GameMode struct {
 	onLog   func(string)
 	onTriggerLineSpecial func(special, lineID, secID, thingID, tag int)
 
+	playerStats *player.PlayerStats
+
 	// Ordered top to bottom
 	layers []Layer
 
@@ -43,18 +46,16 @@ type GameMode struct {
 // NewGameMode creates a new GameMode instance with the 7-layer stack.
 func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 	var titleImg *ebiten.Image
-	var stbarImg *ebiten.Image
 	var mapData *wad.MapData
+
+	playerStats := player.NewPlayerStats()
+	hudAssets := NewHUDAssets(w)
 
 	if w != nil {
 		if img, err := w.GetPatchImage("TITLEPIC"); err == nil {
 			titleImg = img
 		} else if img, err := w.GetPatchImage("INTERPIC"); err == nil {
 			titleImg = img
-		}
-
-		if img, err := w.GetPatchImage("STBAR"); err == nil {
-			stbarImg = img
 		}
 
 		if mapName != "" {
@@ -68,7 +69,7 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 	menu := NewGameMenuLayer()
 	miniMap := NewMiniMapLayer(mapData)
 	levelView := NewLevelViewLayer()
-	hud := NewHUDLayer(stbarImg)
+	hud := NewHUDLayerWithAssets(hudAssets, playerStats)
 	intermission := NewIntermissionLayer(titleImg)
 
 	if mapData != nil {
@@ -89,6 +90,12 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 		}
 	})
 
+	controls.SetOnSelectWeaponSlot(func(slot int) {
+		if playerStats != nil {
+			playerStats.SelectSlot(slot)
+		}
+	})
+
 	// Layer stack ordered from top to bottom
 	layers := []Layer{
 		common,
@@ -105,6 +112,7 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 		wadFile:           w,
 		buffer:            ebiten.NewImage(GameBufferWidth, GameBufferHeight),
 		bgColor:           color.RGBA{R: 0, G: 0, B: 0, A: 255},
+		playerStats:       playerStats,
 		layers:            layers,
 		commonLayer:       common,
 		gameMenuLayer:     menu,
@@ -149,6 +157,9 @@ func (g *GameMode) MapName() string {
 // SetMapName updates the active map name and reloads map geometry, BSP, and textures.
 func (g *GameMode) SetMapName(name string) {
 	g.mapName = name
+	if g.playerStats != nil {
+		g.playerStats.Reset()
+	}
 	if g.wadFile != nil && name != "" {
 		if md, err := g.wadFile.LoadMap(name); err == nil {
 			g.miniMapLayer.SetMapData(md)
@@ -213,6 +224,11 @@ func (g *GameMode) GameControlsLayer() *GameControlsLayer {
 // HUDLayer returns the HUDLayer instance.
 func (g *GameMode) HUDLayer() *HUDLayer {
 	return g.hudLayer
+}
+
+// PlayerStats returns the active player statistics instance.
+func (g *GameMode) PlayerStats() *player.PlayerStats {
+	return g.playerStats
 }
 
 // MiniMapLayer returns the MiniMapLayer instance.

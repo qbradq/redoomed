@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/d5/tengo/v2"
+
+	"github.com/qbradq/redoomed/pkg/player"
 )
 
 func TestREPLEvaluation(t *testing.T) {
@@ -257,3 +259,94 @@ func TestFmtModuleRedirection(t *testing.T) {
 		t.Errorf("expected 'Score: 0007', got %q", captured[1])
 	}
 }
+
+func TestPlayerModuleScripting(t *testing.T) {
+	ps := player.NewPlayerStats()
+	repl := NewREPL(nil, nil)
+	repl.SetPlayerStatsProvider(func() *player.PlayerStats {
+		return ps
+	})
+
+	_, err := repl.Eval(`p := import("player")`)
+	if err != nil {
+		t.Fatalf("Eval(import(\"player\")) failed: %v", err)
+	}
+
+	// Test health & armor queries
+	res, err := repl.Eval(`p.get_health()`)
+	if err != nil {
+		t.Fatalf("Eval(p.get_health()) failed: %v", err)
+	}
+	if res != "100" {
+		t.Errorf("expected health 100, got %s", res)
+	}
+
+	// Test damage via script
+	_, err = repl.Eval(`p.damage(25)`)
+	if err != nil {
+		t.Fatalf("Eval(p.damage(25)) failed: %v", err)
+	}
+	if ps.Health != 75 {
+		t.Errorf("expected health 75 after damage, got %d", ps.Health)
+	}
+
+	// Test give health
+	_, err = repl.Eval(`p.give_health(15, 100)`)
+	if err != nil {
+		t.Fatalf("Eval(p.give_health(15, 100)) failed: %v", err)
+	}
+	if ps.Health != 90 {
+		t.Errorf("expected health 90 after give_health, got %d", ps.Health)
+	}
+
+	// Test give weapon and select weapon
+	_, err = repl.Eval(`p.give_weapon("shotgun")`)
+	if err != nil {
+		t.Fatalf("Eval(p.give_weapon) failed: %v", err)
+	}
+	if !ps.HasWeapon(player.WeaponShotgun) {
+		t.Error("expected player to own shotgun")
+	}
+
+	res, err = repl.Eval(`p.has_weapon("shotgun")`)
+	if err != nil || res != "true" {
+		t.Errorf("expected has_weapon to return true, got %s (err: %v)", res, err)
+	}
+
+	// Test give ammo
+	_, err = repl.Eval(`p.give_ammo("shells", 20)`)
+	if err != nil {
+		t.Fatalf("Eval(p.give_ammo) failed: %v", err)
+	}
+	if ps.Ammo[player.AmmoShells] != 28 { // 8 on pickup + 20
+		t.Errorf("expected 28 shells, got %d", ps.Ammo[player.AmmoShells])
+	}
+
+	// Test give key
+	_, err = repl.Eval(`p.give_key("blue_card")`)
+	if err != nil {
+		t.Fatalf("Eval(p.give_key) failed: %v", err)
+	}
+	if !ps.HasKey(player.KeyBlueCard) {
+		t.Error("expected player to possess blue card")
+	}
+
+	// Test god mode
+	_, err = repl.Eval(`p.god_mode(true)`)
+	if err != nil {
+		t.Fatalf("Eval(p.god_mode(true)) failed: %v", err)
+	}
+	if !ps.GodMode {
+		t.Error("expected god mode to be enabled")
+	}
+
+	// Test give all (IDKFA)
+	_, err = repl.Eval(`p.give_all()`)
+	if err != nil {
+		t.Fatalf("Eval(p.give_all()) failed: %v", err)
+	}
+	if ps.Health != 200 || ps.Armor != 200 {
+		t.Errorf("expected 200 health/armor from give_all, got %d/%d", ps.Health, ps.Armor)
+	}
+}
+

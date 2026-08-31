@@ -9,6 +9,7 @@ import (
 
 	"github.com/qbradq/redoomed/pkg/gfx"
 	"github.com/qbradq/redoomed/pkg/physics"
+	"github.com/qbradq/redoomed/pkg/player"
 	"github.com/qbradq/redoomed/pkg/render"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
@@ -100,10 +101,11 @@ func (l *GameMenuLayer) PreventsLowerDrawing() bool { return false }
 
 // GameControlsLayer handles gameplay inputs like movement, use actions, and automap toggle.
 type GameControlsLayer struct {
-	visible         bool
-	onToggleMiniMap func()
-	onMovePlayer    func(forward, strafe, turn float64)
-	onUse           func()
+	visible            bool
+	onToggleMiniMap    func()
+	onMovePlayer       func(forward, strafe, turn float64)
+	onUse              func()
+	onSelectWeaponSlot func(slot int)
 }
 
 // NewGameControlsLayer creates a new GameControlsLayer.
@@ -131,6 +133,11 @@ func (l *GameControlsLayer) SetOnUse(fn func()) {
 	l.onUse = fn
 }
 
+// SetOnSelectWeaponSlot updates the weapon slot selection callback.
+func (l *GameControlsLayer) SetOnSelectWeaponSlot(fn func(slot int)) {
+	l.onSelectWeaponSlot = fn
+}
+
 func (l *GameControlsLayer) Update() (bool, error) {
 	if !l.visible {
 		return false, nil
@@ -146,6 +153,37 @@ func (l *GameControlsLayer) Update() (bool, error) {
 	if inpututil.IsKeyJustPressed(ebiten.KeyE) || inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		if l.onUse != nil {
 			l.onUse()
+		}
+	}
+
+	// Weapon slot selection (1-7)
+	if inpututil.IsKeyJustPressed(ebiten.Key1) || inpututil.IsKeyJustPressed(ebiten.KeyKP1) {
+		if l.onSelectWeaponSlot != nil {
+			l.onSelectWeaponSlot(1)
+		}
+	} else if inpututil.IsKeyJustPressed(ebiten.Key2) || inpututil.IsKeyJustPressed(ebiten.KeyKP2) {
+		if l.onSelectWeaponSlot != nil {
+			l.onSelectWeaponSlot(2)
+		}
+	} else if inpututil.IsKeyJustPressed(ebiten.Key3) || inpututil.IsKeyJustPressed(ebiten.KeyKP3) {
+		if l.onSelectWeaponSlot != nil {
+			l.onSelectWeaponSlot(3)
+		}
+	} else if inpututil.IsKeyJustPressed(ebiten.Key4) || inpututil.IsKeyJustPressed(ebiten.KeyKP4) {
+		if l.onSelectWeaponSlot != nil {
+			l.onSelectWeaponSlot(4)
+		}
+	} else if inpututil.IsKeyJustPressed(ebiten.Key5) || inpututil.IsKeyJustPressed(ebiten.KeyKP5) {
+		if l.onSelectWeaponSlot != nil {
+			l.onSelectWeaponSlot(5)
+		}
+	} else if inpututil.IsKeyJustPressed(ebiten.Key6) || inpututil.IsKeyJustPressed(ebiten.KeyKP6) {
+		if l.onSelectWeaponSlot != nil {
+			l.onSelectWeaponSlot(6)
+		}
+	} else if inpututil.IsKeyJustPressed(ebiten.Key7) || inpututil.IsKeyJustPressed(ebiten.KeyKP7) {
+		if l.onSelectWeaponSlot != nil {
+			l.onSelectWeaponSlot(7)
 		}
 	}
 
@@ -202,8 +240,10 @@ func (l *GameControlsLayer) PreventsLowerDrawing() bool { return false }
 
 // HUDLayer renders the game's heads-up display (status bar).
 type HUDLayer struct {
-	visible    bool
-	stbarImage *ebiten.Image
+	visible     bool
+	stbarImage  *ebiten.Image
+	assets      *HUDAssets
+	playerStats *player.PlayerStats
 }
 
 // NewHUDLayer creates a new HUDLayer with the provided status bar texture.
@@ -214,23 +254,101 @@ func NewHUDLayer(stbar *ebiten.Image) *HUDLayer {
 	}
 }
 
+// NewHUDLayerWithAssets creates a HUDLayer with preloaded assets and player stats.
+func NewHUDLayerWithAssets(assets *HUDAssets, stats *player.PlayerStats) *HUDLayer {
+	var stbar *ebiten.Image
+	if assets != nil {
+		stbar = assets.STBAR
+	}
+	return &HUDLayer{
+		visible:     true,
+		stbarImage:  stbar,
+		assets:      assets,
+		playerStats: stats,
+	}
+}
+
 func (l *HUDLayer) Name() string { return "HUD" }
 
 func (l *HUDLayer) Update() (bool, error) {
+	if l.playerStats != nil {
+		l.playerStats.Update()
+	}
 	return false, nil
 }
 
 // Draw renders the status bar at the bottom of the 320x200 logical game buffer.
 func (l *HUDLayer) Draw(screen *ebiten.Image) {
-	if !l.visible || l.stbarImage == nil {
+	if !l.visible {
 		return
 	}
-	op := &ebiten.DrawImageOptions{}
-	op.Filter = ebiten.FilterNearest
-	stbarHeight := l.stbarImage.Bounds().Dy()
-	y := GameBufferHeight - stbarHeight
-	op.GeoM.Translate(0, float64(y))
-	screen.DrawImage(l.stbarImage, op)
+
+	baseY := GameBufferHeight - 32 // 168
+
+	// 1. Draw STBAR background
+	if l.assets != nil && l.assets.STBAR != nil {
+		op := &ebiten.DrawImageOptions{}
+		op.Filter = ebiten.FilterNearest
+		op.GeoM.Translate(0, float64(baseY))
+		screen.DrawImage(l.assets.STBAR, op)
+	} else if l.stbarImage != nil {
+		op := &ebiten.DrawImageOptions{}
+		op.Filter = ebiten.FilterNearest
+		stbarHeight := l.stbarImage.Bounds().Dy()
+		y := GameBufferHeight - stbarHeight
+		op.GeoM.Translate(0, float64(y))
+		screen.DrawImage(l.stbarImage, op)
+	}
+
+	if l.playerStats == nil || l.assets == nil {
+		return
+	}
+
+	ps := l.playerStats
+
+	// 2. Selected weapon ammo (tall numbers at x=44, y=171)
+	if hasAmmo, cur, _ := ps.GetReadyWeaponAmmo(); hasAmmo {
+		l.assets.DrawTallNumber(screen, cur, 44, baseY+3)
+	}
+
+	// 3. Health (tall numbers at x=90, y=171 + %)
+	l.assets.DrawTallNumber(screen, ps.Health, 90, baseY+3)
+	l.assets.DrawPercent(screen, 90, baseY+3)
+
+	// 4. Arms Grid (x=104, y=168)
+	l.assets.DrawArms(screen, ps, 104, baseY)
+
+	// 5. Mugshot Face (x=143, y=168)
+	faceFrame := ps.GetFaceFrame()
+	l.assets.DrawFace(screen, faceFrame, 143, baseY)
+
+	// 6. Armor (tall numbers at x=221, y=171 + %)
+	l.assets.DrawTallNumber(screen, ps.Armor, 221, baseY+3)
+	l.assets.DrawPercent(screen, 221, baseY+3)
+
+	// 7. Keys (x=239: Blue slot 0 y=171, Yellow slot 1 y=179, Red slot 2 y=187)
+	hasCard0, hasSkull0 := ps.HasKeySlot(0)
+	l.assets.DrawKey(screen, 0, hasCard0, hasSkull0, 239, baseY+3)
+
+	hasCard1, hasSkull1 := ps.HasKeySlot(1)
+	l.assets.DrawKey(screen, 1, hasCard1, hasSkull1, 239, baseY+11)
+
+	hasCard2, hasSkull2 := ps.HasKeySlot(2)
+	l.assets.DrawKey(screen, 2, hasCard2, hasSkull2, 239, baseY+19)
+
+	// 8. Ammo Table (Right box)
+	// Bullets
+	l.assets.DrawSmallNumber(screen, ps.Ammo[player.AmmoBullets], 288, baseY+5)
+	l.assets.DrawSmallNumber(screen, ps.MaxAmmo[player.AmmoBullets], 314, baseY+5)
+	// Shells
+	l.assets.DrawSmallNumber(screen, ps.Ammo[player.AmmoShells], 288, baseY+11)
+	l.assets.DrawSmallNumber(screen, ps.MaxAmmo[player.AmmoShells], 314, baseY+11)
+	// Rockets
+	l.assets.DrawSmallNumber(screen, ps.Ammo[player.AmmoRockets], 288, baseY+17)
+	l.assets.DrawSmallNumber(screen, ps.MaxAmmo[player.AmmoRockets], 314, baseY+17)
+	// Cells
+	l.assets.DrawSmallNumber(screen, ps.Ammo[player.AmmoCells], 288, baseY+23)
+	l.assets.DrawSmallNumber(screen, ps.MaxAmmo[player.AmmoCells], 314, baseY+23)
 }
 
 func (l *HUDLayer) IsVisible() bool { return l.visible }
@@ -242,6 +360,32 @@ func (l *HUDLayer) PreventsLowerDrawing() bool { return false }
 // SetSTBARImage updates the status bar image texture.
 func (l *HUDLayer) SetSTBARImage(img *ebiten.Image) {
 	l.stbarImage = img
+	if l.assets != nil {
+		l.assets.STBAR = img
+	}
+}
+
+// SetAssets updates the HUDAssets reference.
+func (l *HUDLayer) SetAssets(assets *HUDAssets) {
+	l.assets = assets
+	if assets != nil && assets.STBAR != nil {
+		l.stbarImage = assets.STBAR
+	}
+}
+
+// Assets returns the HUDAssets reference.
+func (l *HUDLayer) Assets() *HUDAssets {
+	return l.assets
+}
+
+// SetPlayerStats updates the player stats reference.
+func (l *HUDLayer) SetPlayerStats(stats *player.PlayerStats) {
+	l.playerStats = stats
+}
+
+// PlayerStats returns the player stats reference.
+func (l *HUDLayer) PlayerStats() *player.PlayerStats {
+	return l.playerStats
 }
 
 // MiniMapLayer renders the vector line automap from above with player position arrow.
