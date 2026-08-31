@@ -222,15 +222,15 @@ func ConvertMUSToMIDI(musData []byte) ([]byte, error) {
 	writeVarLen(trackBuf, currentDelta)
 	trackBuf.Write([]byte{0xFF, 0x2F, 0x00})
 
-	// Build Standard MIDI File (SMF Type 0, 1 track, 140 ticks per quarter note)
+	// Build Standard MIDI File (SMF Type 0, 1 track, 70 ticks per quarter note -> 140 ticks/sec at default 120 BPM)
 	out := new(bytes.Buffer)
 
 	// MThd chunk
 	out.WriteString("MThd")
-	_ = binary.Write(out, binary.BigEndian, uint32(6))   // Header length
-	_ = binary.Write(out, binary.BigEndian, uint16(0))   // Format 0 (single track)
-	_ = binary.Write(out, binary.BigEndian, uint16(1))   // 1 Track
-	_ = binary.Write(out, binary.BigEndian, uint16(140)) // Division: 140 ticks/quarter note
+	_ = binary.Write(out, binary.BigEndian, uint32(6))  // Header length
+	_ = binary.Write(out, binary.BigEndian, uint16(0))  // Format 0 (single track)
+	_ = binary.Write(out, binary.BigEndian, uint16(1))  // 1 Track
+	_ = binary.Write(out, binary.BigEndian, uint16(70)) // Division: 70 ticks/quarter note
 
 	// MTrk chunk
 	out.WriteString("MTrk")

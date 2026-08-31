@@ -36,8 +36,14 @@ type App struct {
 	exitRequested bool
 }
 
-// NewApp creates and initializes a new ReDoomEd App instance.
+// NewApp creates and initializes a new ReDoomEd App instance using default IWAD discovery.
 func NewApp() *App {
+	return NewAppWithIWAD("")
+}
+
+// NewAppWithIWAD creates and initializes a new ReDoomEd App instance with an optional IWAD path.
+// If iwadPath is empty, standard search paths are searched for an available IWAD.
+func NewAppWithIWAD(iwadPath string) *App {
 	app := &App{}
 
 	// Load the 8x8 fixed-width console font (unscii-8.ttf)
@@ -48,20 +54,34 @@ func NewApp() *App {
 		app.consoleFont = cf
 	}
 
-	// Locate and open default IWAD if available (retained for future gameplay / status bar rendering)
-	searchPaths := []string{"freedoom2.wad", "../freedoom2.wad", "../../freedoom2.wad"}
-	var wadPath string
-	for _, p := range searchPaths {
-		if _, err := os.Stat(p); err == nil {
-			wadPath = p
-			break
+	// Locate and open IWAD
+	var wadToOpen string
+	if iwadPath != "" {
+		if _, err := os.Stat(iwadPath); err == nil {
+			wadToOpen = iwadPath
+		} else {
+			log.Printf("Warning: specified IWAD %q not found: %v", iwadPath, err)
+		}
+	} else {
+		searchPaths := []string{
+			"DoomShareware.wad", "doomshareware.wad", "DOOM1.WAD", "doom1.wad", "DOOM.WAD", "doom.wad",
+			"freedoom2.wad", "freedoom1.wad", "DOOM2.WAD", "doom2.wad",
+			"../DoomShareware.wad", "../../DoomShareware.wad",
+			"../doomshareware.wad", "../../doomshareware.wad",
+			"../freedoom2.wad", "../../freedoom2.wad",
+		}
+		for _, p := range searchPaths {
+			if _, err := os.Stat(p); err == nil {
+				wadToOpen = p
+				break
+			}
 		}
 	}
 
-	if wadPath != "" {
-		w, err := wad.Open(wadPath)
+	if wadToOpen != "" {
+		w, err := wad.Open(wadToOpen)
 		if err != nil {
-			log.Printf("Warning: failed to open WAD %q: %v", wadPath, err)
+			log.Printf("Warning: failed to open WAD %q: %v", wadToOpen, err)
 		} else {
 			app.wadFile = w
 			hf, err := wad.NewHUDFont(w)

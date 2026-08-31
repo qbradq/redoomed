@@ -29,13 +29,13 @@ func TestNewApp(t *testing.T) {
 		t.Error("expected console font (unscii-8) to be loaded")
 	}
 
-	// Autoexec script runs game.StartMap("MAP01"), so active mode is GameMode
+	// Autoexec script runs game.StartMap("E1M1"), so active mode is GameMode
 	gameMode, ok := app.CurrentMode().(*mode.GameMode)
 	if !ok || gameMode == nil {
 		t.Fatalf("expected current mode to be *mode.GameMode after autoexec, got %T", app.CurrentMode())
 	}
-	if gameMode.MapName() != "MAP01" {
-		t.Errorf("expected map name 'MAP01', got %q", gameMode.MapName())
+	if gameMode.MapName() != "E1M1" {
+		t.Errorf("expected map name 'E1M1', got %q", gameMode.MapName())
 	}
 
 	console := app.ConsoleMode()
@@ -155,5 +155,22 @@ func TestAppStartMapCommand(t *testing.T) {
 
 	if err := app.Update(); err != nil {
 		t.Errorf("Update() returned error: %v", err)
+	}
+}
+
+func TestNewAppWithIWAD(t *testing.T) {
+	// Test with explicit IWAD path
+	app := NewAppWithIWAD("../../freedoom2.wad")
+	if app == nil {
+		t.Fatal("expected NewAppWithIWAD to return non-nil app")
+	}
+	if app.WAD() == nil {
+		t.Log("Note: freedoom2.wad was not found at relative path in this environment")
+	}
+
+	// Test with invalid path (should gracefully handle missing file and not panic)
+	appInvalid := NewAppWithIWAD("nonexistent.wad")
+	if appInvalid == nil {
+		t.Fatal("expected NewAppWithIWAD to handle missing file gracefully")
 	}
 }

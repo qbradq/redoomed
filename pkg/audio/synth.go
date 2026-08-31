@@ -122,7 +122,7 @@ func NewMIDISynth(midiData []byte, sampleRate int) (*MIDISynth, error) {
 	division := int(binary.BigEndian.Uint16(midiData[12:14]))
 
 	if division <= 0 {
-		division = 140
+		division = 70
 	}
 
 	synth := &MIDISynth{
@@ -401,20 +401,21 @@ func (s *MIDISynth) RenderAll() ([]byte, error) {
 		}
 
 		// Calculate how many samples until next event
-		var nextTick int64
+		var samplesToRender int
 		if eventIdx < len(s.events) {
-			nextTick = s.events[eventIdx].tick
+			nextTick := s.events[eventIdx].tick
+			samplesToRender = int(float64(nextTick-currentTick) * secondsPerTick * float64(s.sampleRate))
+			currentTick = nextTick
 		} else {
-			// Finish ring-out of active voices (max 2 seconds)
-			nextTick = currentTick + int64(s.division*2)
+			// Finish ring-out of active voices (render 1 second of ring-out)
+			samplesToRender = s.sampleRate
+			for i := range voices {
+				voices[i].active = false
+			}
 		}
 
-		samplesToRender := int(float64(nextTick-currentTick) * secondsPerTick * float64(s.sampleRate))
 		if samplesToRender <= 0 {
 			samplesToRender = 1
-		}
-		if samplesToRender > s.sampleRate*2 {
-			samplesToRender = s.sampleRate * 2
 		}
 
 		// Render audio frame chunk
@@ -422,7 +423,6 @@ func (s *MIDISynth) RenderAll() ([]byte, error) {
 		out.Write(chunk)
 
 		currentSample += int64(samplesToRender)
-		currentTick = nextTick
 	}
 
 	return out.Bytes(), nil

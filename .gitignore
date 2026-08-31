@@ -37,4 +37,4 @@ go.work.sum
 PROMPT.md
 
 # Test data
-freedoom2.wad
+*.wad
