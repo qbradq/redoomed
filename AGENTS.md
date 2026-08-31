@@ -38,6 +38,10 @@ Welcome to **ReDoomEd**! This document provides essential architectural context,
 │   │   ├── game.go               # 320x200 GameMode managing 7-layer stack, scaled to 1280x800
 │   │   ├── game_test.go
 │   │   └── layer.go              # Composable Layer interface & 7 layer implementations
+│   ├── physics/                  # Collision detection, bounding box sampling, step/crack/ceiling checks, sliding
+│   │   ├── actor.go              # Actor struct, player/monster physical properties and constructors
+│   │   ├── collision.go          # CheckPosition, TryMove, SlideMove, Move, distance/overlap routines
+│   │   └── physics_test.go
 │   ├── render/                   # 2.5D Doom BSP raycasting / column software rasterizer
 │   │   ├── renderer.go           # BSP traversal, 1D clipping, walls, visplanes, colormap, sky
 │   │   └── renderer_test.go
@@ -84,7 +88,15 @@ Welcome to **ReDoomEd**! This document provides essential architectural context,
   6. `LevelViewLayer`: 2.5D software-rendered level view via `render.Renderer`. Occludes lower layers when active.
   7. `IntermissionLayer`: Title/intermission full-screen graphic (e.g. `TITLEPIC` / `INTERPIC`).
 
-### B. 2.5D Software Renderer (`pkg/render`)
+### B. Collision Detection & Physics Engine (`pkg/physics`)
+- **Actor Physics Properties**: `Radius` (16.0), `Height` (56.0), `EyeHeight` (41.0), `MaxStepHeight` (24.0).
+- **Solid Wall Collision**: Line-to-point Euclidean segment distance checking against 1-sided linedefs and 2-sided linedefs with `LinedefBlocking` or `LinedefBlockMonsters`.
+- **Step-Up Clamping**: Restricts vertical floor ascension to `MaxStepHeight` (24 Doom units); taller steps block movement.
+- **Low Ceiling Clearance**: Prevents actors from moving into or under openings shorter than the actor's height (`CeilingZ - FloorZ < Height` or `CeilingZ - Z < Height`).
+- **Floor Crack Avoidance**: Multi-point bounding box sampling queries all overlapping sectors and adopts `highestFloor`, ensuring actors standing over small cracks or trenches remain supported by adjacent floors.
+- **Wall Sliding (`SlideMove`)**: Decomposes blocked diagonal vectors into unconstrained axial/tangential components for responsive movement along solid geometry.
+
+### C. 2.5D Software Renderer (`pkg/render`)
 - **Internal Resolution**: 320x168 active 2.5D viewport, rendered into a 320x200 buffer (`DefaultBufferHeight`).
 - **Frustum & Field of View**: 90° horizontal FOV.
 - **BSP Front-to-Back Traversal**: Traverses `mapData.Nodes` using partition lines and camera coordinates. Bounding box frustum culling prevents unnecessary sub-tree traversal.
@@ -95,7 +107,7 @@ Welcome to **ReDoomEd**! This document provides essential architectural context,
 - **Sky Rendering**: Automatically maps Doom 1/2 episodes to `SKY1`–`SKY4`, projected as a 360° cylinder across 4 texture repetitions, rendered full-bright (colormap 0).
 - **Framebuffer Output**: Direct byte-slice rasterization transferred to `ebiten.Image` via `WritePixels()`.
 
-### C. WAD File & Map Geometry (`pkg/wad`)
+### D. WAD File & Map Geometry (`pkg/wad`)
 - **Map Format**: Standard Doom map lumps (`VERTEXES`, `LINEDEFS`, `SIDEDEFS`, `SECTORS`, `SEGS`, `SSECTORS`, `NODES`, `THINGS`).
 - **Texture Manager**: Resolves patches from `PNAMES`, composite textures from `TEXTURE1`/`TEXTURE2`, 64x64 flats, `PLAYPAL` palette 0 (768-byte RGB), and `COLORMAP`. Preloads map textures on map switch.
 - **Spatial Queries**:
@@ -104,7 +116,7 @@ Welcome to **ReDoomEd**! This document provides essential architectural context,
   - `Bounds()`: Computes 2D bounding box of map vertexes.
   - `Player1Start()`: Locates player 1 spawn thing (`Type == 1`).
 
-### D. Scripting Engine (`pkg/script`)
+### E. Scripting Engine (`pkg/script`)
 - **Tengo REPL**: Interactive environment preserving symbol table and global variables across executions.
 - **Registered Modules**:
   - Standard Tengo library modules (`math`, `text`, `times`, `rand`, `json`, etc.).

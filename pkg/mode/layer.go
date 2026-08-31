@@ -8,6 +8,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	"github.com/qbradq/redoomed/pkg/gfx"
+	"github.com/qbradq/redoomed/pkg/physics"
 	"github.com/qbradq/redoomed/pkg/render"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
@@ -525,18 +526,20 @@ func (l *MiniMapLayer) PreventsLowerDrawing() bool { return true }
 
 // LevelViewLayer renders the 2.5D software-rendered level view.
 type LevelViewLayer struct {
-	visible   bool
-	mapData   *wad.MapData
-	renderer  *render.Renderer
-	cam       render.Camera
-	hasPlayer bool
+	visible     bool
+	mapData     *wad.MapData
+	renderer    *render.Renderer
+	cam         render.Camera
+	playerActor *physics.Actor
+	hasPlayer   bool
 }
 
 // NewLevelViewLayer creates a new LevelViewLayer (hidden by default, occludes lower layers when visible).
 func NewLevelViewLayer() *LevelViewLayer {
 	return &LevelViewLayer{
-		visible:  false,
-		renderer: render.NewRenderer(GameBufferWidth, 168, GameBufferHeight),
+		visible:     false,
+		renderer:    render.NewRenderer(GameBufferWidth, 168, GameBufferHeight),
+		playerActor: physics.NewPlayerActor(0, 0, render.DefaultPlayerEyeHeight, 0),
 		cam: render.Camera{
 			EyeHeight: render.DefaultPlayerEyeHeight,
 		},
@@ -550,13 +553,17 @@ func (l *LevelViewLayer) SetMapData(m *wad.MapData) {
 	l.mapData = m
 	if m != nil {
 		if p1, ok := m.Player1Start(); ok {
-			l.cam.X = float64(p1.X)
-			l.cam.Y = float64(p1.Y)
-			l.cam.Angle = float64(p1.Angle)
+			l.playerActor = physics.NewPlayerActor(float64(p1.X), float64(p1.Y), 0, float64(p1.Angle))
 			l.hasPlayer = true
-			if sec, ok := m.SectorAt(l.cam.X, l.cam.Y); ok && sec != nil {
-				l.cam.Z = float64(sec.FloorHeight) + l.cam.EyeHeight
+			if sec, ok := m.SectorAt(l.playerActor.X, l.playerActor.Y); ok && sec != nil {
+				l.playerActor.FloorZ = float64(sec.FloorHeight)
+				l.playerActor.CeilingZ = float64(sec.CeilingHeight)
 			}
+			l.playerActor.Z = l.playerActor.FloorZ + l.playerActor.EyeHeight
+			l.cam.X = l.playerActor.X
+			l.cam.Y = l.playerActor.Y
+			l.cam.Z = l.playerActor.Z
+			l.cam.Angle = l.playerActor.Angle
 		} else {
 			l.hasPlayer = false
 		}
@@ -575,6 +582,11 @@ func (l *LevelViewLayer) Camera() *render.Camera {
 	return &l.cam
 }
 
+// Player returns the underlying physics actor for the player.
+func (l *LevelViewLayer) Player() *physics.Actor {
+	return l.playerActor
+}
+
 // SetCamera updates the camera position and angle.
 func (l *LevelViewLayer) SetCamera(x, y, z, angle float64) {
 	l.cam.X = x
@@ -582,42 +594,32 @@ func (l *LevelViewLayer) SetCamera(x, y, z, angle float64) {
 	l.cam.Z = z
 	l.cam.Angle = angle
 	l.hasPlayer = true
+	if l.playerActor == nil {
+		l.playerActor = physics.NewPlayerActor(x, y, z, angle)
+	} else {
+		l.playerActor.X = x
+		l.playerActor.Y = y
+		l.playerActor.Z = z
+		l.playerActor.Angle = angle
+		l.playerActor.FloorZ = z - l.playerActor.EyeHeight
+	}
 }
 
-// MovePlayer moves and rotates the camera based on forward, strafe, and turn deltas.
+// MovePlayer moves and rotates the player using physics collision detection and sliding.
 func (l *LevelViewLayer) MovePlayer(forward, strafe, turn float64) {
 	if !l.hasPlayer {
 		return
 	}
-
-	l.cam.Angle += turn
-	for l.cam.Angle < 0 {
-		l.cam.Angle += 360
-	}
-	for l.cam.Angle >= 360 {
-		l.cam.Angle -= 360
+	if l.playerActor == nil {
+		l.playerActor = physics.NewPlayerActor(l.cam.X, l.cam.Y, l.cam.Z, l.cam.Angle)
 	}
 
-	rad := l.cam.Angle * math.Pi / 180.0
-	cosA := math.Cos(rad)
-	sinA := math.Sin(rad)
+	physics.Move(l.mapData, l.playerActor, forward, strafe, turn)
 
-	// Forward movement (+cos, +sin)
-	dx := forward * cosA
-	dy := forward * sinA
-
-	// Strafe movement (+sin, -cos)
-	dx += strafe * sinA
-	dy += strafe * (-cosA)
-
-	l.cam.X += dx
-	l.cam.Y += dy
-
-	if l.mapData != nil {
-		if sec, ok := l.mapData.SectorAt(l.cam.X, l.cam.Y); ok && sec != nil {
-			l.cam.Z = float64(sec.FloorHeight) + l.cam.EyeHeight
-		}
-	}
+	l.cam.X = l.playerActor.X
+	l.cam.Y = l.playerActor.Y
+	l.cam.Z = l.playerActor.Z
+	l.cam.Angle = l.playerActor.Angle
 }
 
 func (l *LevelViewLayer) Update() (bool, error) {
