@@ -336,4 +336,161 @@ func TestLiftRidingAndMovement(t *testing.T) {
 	}
 }
 
+func TestGravityFallingAndLanding(t *testing.T) {
+	mapData := createTwoSectorMap(0, 256, 0, 256, wad.LinedefTwoSided, true)
+
+	// Spawn actor 100 units above floor (floor=0, eyeHeight=41, so groundZ=41)
+	actor := NewPlayerActor(0, 0, 141, 0)
+	actor.FloorZ = 0
+	actor.Z = 141 // 100 units above ground
+	actor.OnGround = false
+
+	// Tick 1: VelZ should become -1.0, Z should become 140.0
+	ApplyGravity(mapData, actor)
+	if actor.VelZ != -1.0 {
+		t.Errorf("expected VelZ -1.0 on tick 1, got %f", actor.VelZ)
+	}
+	if actor.Z != 140.0 {
+		t.Errorf("expected Z 140.0 on tick 1, got %f", actor.Z)
+	}
+	if actor.OnGround {
+		t.Error("expected actor to still be in air")
+	}
+
+	// Tick 2: VelZ should become -2.0, Z should become 138.0
+	ApplyGravity(mapData, actor)
+	if actor.VelZ != -2.0 {
+		t.Errorf("expected VelZ -2.0 on tick 2, got %f", actor.VelZ)
+	}
+	if actor.Z != 138.0 {
+		t.Errorf("expected Z 138.0 on tick 2, got %f", actor.Z)
+	}
+
+	// Simulate remaining ticks until actor lands on floor
+	for i := 0; i < 50; i++ {
+		ApplyGravity(mapData, actor)
+		if actor.OnGround {
+			break
+		}
+	}
+
+	if !actor.OnGround {
+		t.Errorf("expected actor to have landed on ground, Z=%f, VelZ=%f", actor.Z, actor.VelZ)
+	}
+	if actor.Z != 41.0 {
+		t.Errorf("expected actor Z to land exactly at 41.0, got %f", actor.Z)
+	}
+	if actor.VelZ != 0.0 {
+		t.Errorf("expected VelZ to be reset to 0 upon landing, got %f", actor.VelZ)
+	}
+}
+
+func TestWalkingOffLedge(t *testing.T) {
+	// Sector 0 (left: x < 0) has floor 100.
+	// Sector 1 (right: x > 0) has floor 0 (100-unit drop).
+	mapData := createTwoSectorMap(100, 256, 0, 256, wad.LinedefTwoSided, true)
+
+	player := NewPlayerActor(-20, 0, 141, 0) // Standing on Sector 0 at floor 100, facing East
+	player.FloorZ = 100
+	player.Z = 141
+
+	// Move forward across x=0 ledge into Sector 1
+	oldX := player.X
+	Move(mapData, player, 40, 0, 0)
+	if player.X <= oldX {
+		t.Fatalf("expected player to move across ledge, remained at X %f", player.X)
+	}
+	if player.FloorZ != 0 {
+		t.Errorf("expected new FloorZ to be 0 beneath player, got %f", player.FloorZ)
+	}
+	// Player should still be at Z=141 in mid-air right after the horizontal move step
+	if player.Z != 141 {
+		t.Errorf("expected player to remain in mid-air at Z 141 immediately after walking off ledge, got %f", player.Z)
+	}
+	if player.OnGround {
+		t.Error("expected player to be in air (OnGround=false)")
+	}
+
+	// Apply gravity ticks to fall down to groundZ=41
+	for i := 0; i < 30; i++ {
+		ApplyGravity(mapData, player)
+		if player.OnGround {
+			break
+		}
+	}
+
+	if !player.OnGround {
+		t.Errorf("expected player to have landed at floor 0 after falling, Z=%f", player.Z)
+	}
+	if player.Z != 41 {
+		t.Errorf("expected player to land at Z 41, got %f", player.Z)
+	}
+}
+
+func TestNoGravityFlag(t *testing.T) {
+	mapData := createTwoSectorMap(0, 256, 0, 256, wad.LinedefTwoSided, true)
+
+	// Floating entity (e.g. Cacodemon or flying projectile) at Z=100
+	caco := NewActor(0, 0, 100, 0, 30, 56, 28, 24, true)
+	caco.NoGravity = true
+
+	// Tick gravity several times
+	for i := 0; i < 10; i++ {
+		ApplyGravity(mapData, caco)
+	}
+
+	if caco.Z != 100 {
+		t.Errorf("expected NoGravity entity to remain at Z 100, got %f", caco.Z)
+	}
+	if caco.VelZ != 0 {
+		t.Errorf("expected NoGravity entity to have VelZ 0, got %f", caco.VelZ)
+	}
+}
+
+func TestCeilingCollision(t *testing.T) {
+	// Sector with ceiling at 100, floor at 0
+	mapData := createTwoSectorMap(0, 100, 0, 100, wad.LinedefTwoSided, true)
+
+	// Player with height=56, eyeHeight=41 (head is 15 units above eye level)
+	player := NewPlayerActor(0, 0, 41, 0)
+	player.FloorZ = 0
+	player.CeilingZ = 100
+	player.VelZ = 20.0 // Jumping / launched upward
+
+	// Apply gravity
+	ApplyGravity(mapData, player)
+
+	// At eyeHeight=41, head is at Z + 15 = 41 + 20 + 15 = 76 <= 100 (still climbing)
+	// Next jump impulse to exceed ceiling
+	player.VelZ = 30.0
+	ApplyGravity(mapData, player)
+
+	// Max head position is ceiling (100), so max eye level is 100 - (56 - 41) = 85
+	if player.Z > 85.0 {
+		t.Errorf("expected player eye level to be stopped by ceiling at <= 85.0, got %f", player.Z)
+	}
+	if player.VelZ != 0 {
+		t.Errorf("expected upward velocity to be zeroed on ceiling impact, got %f", player.VelZ)
+	}
+}
+
+func TestMaxFallSpeed(t *testing.T) {
+	mapData := createTwoSectorMap(0, 10000, 0, 10000, wad.LinedefTwoSided, true)
+
+	// Drop from extreme height
+	player := NewPlayerActor(0, 0, 5000, 0)
+	player.FloorZ = 0
+	player.Z = 5000
+
+	// Tick 100 times to exceed terminal velocity
+	for i := 0; i < 100; i++ {
+		ApplyGravity(mapData, player)
+	}
+
+	if player.VelZ < -DefaultMaxFallSpeed {
+		t.Errorf("expected VelZ to be clamped to -%f, got %f", DefaultMaxFallSpeed, player.VelZ)
+	}
+}
+
+
 

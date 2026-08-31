@@ -94,17 +94,99 @@ func SampleFloorCeiling(mapData *wad.MapData, actor *Actor, x, y float64) (floor
 	return highestFloor, lowestCeiling, true
 }
 
-// UpdateActorFloor updates the actor's FloorZ, CeilingZ, and vertical Z based on current map sector heights at (actor.X, actor.Y).
-// This ensures that when elevators, lifts, or moving floors change while an actor stands still, the actor's vertical state stays in sync.
-func UpdateActorFloor(mapData *wad.MapData, actor *Actor) {
+// ApplyGravity applies gravitational acceleration and vertical collision handling (floor landing, ceiling bumping) to the actor for one simulation tick.
+func ApplyGravity(mapData *wad.MapData, actor *Actor) {
 	if mapData == nil || actor == nil {
 		return
 	}
+
+	// 1. Refresh floor and ceiling boundaries at current actor position
 	if floorZ, ceilingZ, ok := SampleFloorCeiling(mapData, actor, actor.X, actor.Y); ok {
 		actor.FloorZ = floorZ
 		actor.CeilingZ = ceilingZ
-		actor.Z = floorZ + actor.EyeHeight
 	}
+
+	targetGroundZ := actor.FloorZ + actor.EyeHeight
+	headOffset := actor.Height - actor.EyeHeight
+
+	gravity := actor.Gravity
+	if gravity <= 0 {
+		gravity = DefaultGravity
+	}
+	maxFall := actor.MaxFallSpeed
+	if maxFall <= 0 {
+		maxFall = DefaultMaxFallSpeed
+	}
+
+	if actor.NoGravity {
+		// Flying / floating entity: enforce floor and ceiling limits without gravity
+		if actor.Z < targetGroundZ {
+			actor.Z = targetGroundZ
+			actor.VelZ = 0
+			actor.OnGround = true
+		}
+		if actor.Z+headOffset > actor.CeilingZ {
+			actor.Z = actor.CeilingZ - headOffset
+			if actor.VelZ > 0 {
+				actor.VelZ = 0
+			}
+		}
+		return
+	}
+
+	// Dynamic gravity simulation
+	if actor.Z > targetGroundZ {
+		// In mid-air: accelerate downwards
+		actor.OnGround = false
+		actor.VelZ -= gravity
+		if actor.VelZ < -maxFall {
+			actor.VelZ = -maxFall
+		}
+
+		actor.Z += actor.VelZ
+
+		// Check landing on floor
+		if actor.Z <= targetGroundZ {
+			actor.Z = targetGroundZ
+			actor.VelZ = 0
+			actor.OnGround = true
+		}
+
+		// Check ceiling bump
+		if actor.Z+headOffset > actor.CeilingZ {
+			actor.Z = actor.CeilingZ - headOffset
+			if actor.VelZ > 0 {
+				actor.VelZ = 0
+			}
+		}
+	} else if actor.Z < targetGroundZ {
+		// Floor rose under the actor (e.g. lift/platform rising)
+		actor.Z = targetGroundZ
+		actor.VelZ = 0
+		actor.OnGround = true
+	} else {
+		// Resting on floor (actor.Z == targetGroundZ)
+		if actor.VelZ > 0 {
+			// Upward momentum (e.g. jump)
+			actor.Z += actor.VelZ
+			actor.OnGround = false
+
+			// Check ceiling bump
+			if actor.Z+headOffset > actor.CeilingZ {
+				actor.Z = actor.CeilingZ - headOffset
+				actor.VelZ = 0
+			}
+		} else {
+			actor.VelZ = 0
+			actor.OnGround = true
+		}
+	}
+}
+
+// UpdateActorFloor updates the actor's FloorZ, CeilingZ, and vertical Z based on current map sector heights at (actor.X, actor.Y).
+// It applies gravity to simulate falling or riding moving floors.
+func UpdateActorFloor(mapData *wad.MapData, actor *Actor) {
+	ApplyGravity(mapData, actor)
 }
 
 // CheckPosition tests whether the actor can legally stand at (targetX, targetY).
@@ -122,7 +204,9 @@ func CheckPosition(mapData *wad.MapData, actor *Actor, targetX, targetY float64)
 	if curFloor, curCeil, ok := SampleFloorCeiling(mapData, actor, actor.X, actor.Y); ok {
 		actor.FloorZ = curFloor
 		actor.CeilingZ = curCeil
-		actor.Z = curFloor + actor.EyeHeight
+		if actor.OnGround && actor.Z < curFloor+actor.EyeHeight {
+			actor.Z = curFloor + actor.EyeHeight
+		}
 	}
 
 	// 2. Sample target location floor and ceiling
@@ -215,7 +299,8 @@ func CheckPosition(mapData *wad.MapData, actor *Actor, targetX, targetY float64)
 }
 
 // TryMove attempts to move the actor directly to (targetX, targetY).
-// If the move is valid, the actor's position, FloorZ, CeilingZ, and Z are updated, returning true.
+// If the move is valid, the actor's position, FloorZ, and CeilingZ are updated, returning true.
+// Vertical elevation (Z) is preserved when walking off ledges so gravity can take effect.
 func TryMove(mapData *wad.MapData, actor *Actor, targetX, targetY float64) bool {
 	if mapData == nil {
 		actor.X = targetX
@@ -228,11 +313,39 @@ func TryMove(mapData *wad.MapData, actor *Actor, targetX, targetY float64) bool 
 		return false
 	}
 
+	oldFloorZ := actor.FloorZ
 	actor.X = targetX
 	actor.Y = targetY
 	actor.FloorZ = floorZ
 	actor.CeilingZ = ceilingZ
-	actor.Z = floorZ + actor.EyeHeight
+
+	groundZ := floorZ + actor.EyeHeight
+	if floorZ > oldFloorZ {
+		// Stepped up onto higher floor
+		if actor.Z < groundZ {
+			actor.Z = groundZ
+			actor.OnGround = true
+			if actor.VelZ < 0 {
+				actor.VelZ = 0
+			}
+		}
+	} else if floorZ < oldFloorZ {
+		// Stepped down or walked off a ledge
+		// If actor was grounded, they are now in the air; let gravity accelerate them downwards
+		if actor.Z <= groundZ {
+			actor.Z = groundZ
+			actor.OnGround = true
+		} else {
+			actor.OnGround = false
+		}
+	} else {
+		// Floor height unchanged
+		if actor.Z <= groundZ {
+			actor.Z = groundZ
+			actor.OnGround = true
+		}
+	}
+
 	return true
 }
 

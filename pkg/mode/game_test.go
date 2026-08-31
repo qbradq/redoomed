@@ -493,5 +493,87 @@ func TestLevelViewLayerFloorUpdate(t *testing.T) {
 	}
 }
 
+func TestGameModeSimulatesGravityDuringMovement(t *testing.T) {
+	// 2-sector map with a high ledge (x < 0 has floor 100, x > 0 has floor 0)
+	mapData := &wad.MapData{
+		Vertexes: []wad.Vertex{
+			{X: -100, Y: -100},
+			{X: 0, Y: -100},
+			{X: 100, Y: -100},
+			{X: 100, Y: 100},
+			{X: 0, Y: 100},
+			{X: -100, Y: 100},
+		},
+		Sectors: []wad.Sector{
+			{FloorHeight: 100, CeilingHeight: 256}, // Sector 0 (x < 0)
+			{FloorHeight: 0, CeilingHeight: 256},   // Sector 1 (x > 0)
+		},
+		Sidedefs: []wad.Sidedef{
+			{Sector: 0},
+			{Sector: 1},
+		},
+		Linedefs: []wad.Linedef{
+			{V1: 1, V2: 4, RightSide: 0, LeftSide: 1, Flags: wad.LinedefTwoSided},
+			{V1: 0, V2: 1, RightSide: 0, LeftSide: 0xFFFF, Flags: wad.LinedefBlocking},
+			{V1: 4, V2: 5, RightSide: 0, LeftSide: 0xFFFF, Flags: wad.LinedefBlocking},
+			{V1: 5, V2: 0, RightSide: 0, LeftSide: 0xFFFF, Flags: wad.LinedefBlocking},
+			{V1: 1, V2: 2, RightSide: 1, LeftSide: 0xFFFF, Flags: wad.LinedefBlocking},
+			{V1: 2, V2: 3, RightSide: 1, LeftSide: 0xFFFF, Flags: wad.LinedefBlocking},
+			{V1: 3, V2: 4, RightSide: 1, LeftSide: 0xFFFF, Flags: wad.LinedefBlocking},
+		},
+		Segs: []wad.Seg{
+			{V1: 1, V2: 4, Linedef: 0, Direction: 0},
+			{V1: 4, V2: 1, Linedef: 0, Direction: 1},
+		},
+		Subsectors: []wad.Subsector{
+			{NumSegs: 1, FirstSeg: 0},
+			{NumSegs: 1, FirstSeg: 1},
+		},
+		Nodes: []wad.Node{
+			{
+				PartitionX: 0,
+				PartitionY: -100,
+				ChangeX:    0,
+				ChangeY:    200,
+				RightChild: 0x8000 | 1,
+				LeftChild:  0x8000 | 0,
+			},
+		},
+		Things: []wad.Thing{
+			{X: -20, Y: 0, Angle: 0, Type: wad.ThingPlayer1Start},
+		},
+	}
+
+	gm := NewGameMode("TEST", nil, nil)
+	gm.levelViewLayer.SetMapData(mapData)
+	gm.levelViewLayer.SetVisible(true)
+	gm.miniMapLayer.SetVisible(false)
+	gm.intermissionLayer.SetVisible(false)
+
+	// Step player off the ledge horizontally into Sector 1 (moving East by 50 units from X=-20 to X=30)
+	gm.levelViewLayer.MovePlayer(50, 0, 0)
+
+	// Right after horizontal move, player is fully clear of the ledge in mid-air over sector 1 (Z = 141)
+	if gm.levelViewLayer.Player().Z != 141 {
+		t.Fatalf("expected player to be in mid-air at Z=141, got %f", gm.levelViewLayer.Player().Z)
+	}
+
+	// Now run GameMode.Update() while movement occurs or controls update
+	// GameMode.Update() must execute levelViewLayer.Update() to apply gravity even if controls layer updated
+	err := gm.Update()
+	if err != nil {
+		t.Fatalf("unexpected error in gm.Update(): %v", err)
+	}
+
+	// Z should have fallen by 1.0 (from 141 down to 140) in this single tick
+	if gm.levelViewLayer.Player().Z != 140.0 {
+		t.Errorf("expected player Z to fall to 140.0 under gravity during GameMode.Update(), got %f", gm.levelViewLayer.Player().Z)
+	}
+	if gm.levelViewLayer.Camera().Z != 140.0 {
+		t.Errorf("expected camera Z to follow gravity to 140.0 during GameMode.Update(), got %f", gm.levelViewLayer.Camera().Z)
+	}
+}
+
+
 
 

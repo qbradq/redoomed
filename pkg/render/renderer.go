@@ -198,13 +198,15 @@ func (r *Renderer) Render(target *ebiten.Image, mapData *wad.MapData, cam *Camer
 	r.maskedClipTop = r.maskedClipTop[:0]
 	r.maskedClipBottom = r.maskedClipBottom[:0]
 
-	// 2. Adjust camera Z to sector floor height if not already set or updated
-	if sec, ok := mapData.SectorAt(cam.X, cam.Y); ok && sec != nil {
-		eyeH := cam.EyeHeight
-		if eyeH <= 0 {
-			eyeH = DefaultPlayerEyeHeight
+	// 2. Adjust camera Z to sector floor height if uninitialized
+	if cam.Z == 0 {
+		if sec, ok := mapData.SectorAt(cam.X, cam.Y); ok && sec != nil {
+			eyeH := cam.EyeHeight
+			if eyeH <= 0 {
+				eyeH = DefaultPlayerEyeHeight
+			}
+			cam.Z = float64(sec.FloorHeight) + eyeH
 		}
-		cam.Z = float64(sec.FloorHeight) + eyeH
 	}
 
 	// 3. Traverse BSP front-to-back

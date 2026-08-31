@@ -136,13 +136,10 @@ func (l *GameControlsLayer) Update() (bool, error) {
 		return false, nil
 	}
 
-	consumed := false
-
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
 		if l.onToggleMiniMap != nil {
 			l.onToggleMiniMap()
 		}
-		return true, nil
 	}
 
 	// Use action (E or Spacebar)
@@ -150,7 +147,6 @@ func (l *GameControlsLayer) Update() (bool, error) {
 		if l.onUse != nil {
 			l.onUse()
 		}
-		consumed = true
 	}
 
 	// Player movement inputs (WASD / Arrows)
@@ -191,10 +187,9 @@ func (l *GameControlsLayer) Update() (bool, error) {
 		if l.onMovePlayer != nil {
 			l.onMovePlayer(forward, strafe, turn)
 		}
-		consumed = true
 	}
 
-	return consumed, nil
+	return false, nil
 }
 
 func (l *GameControlsLayer) Draw(screen *ebiten.Image) {}
