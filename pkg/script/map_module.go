@@ -33,6 +33,13 @@ func createMapModule(getMapData func() *wad.MapData) map[string]tengo.Object {
 		}
 	}
 
+	toBool := func(b bool) tengo.Object {
+		if b {
+			return tengo.TrueValue
+		}
+		return tengo.FalseValue
+	}
+
 	getNameFunc := &tengo.UserFunction{
 		Name: "get_name",
 		Value: func(args ...tengo.Object) (tengo.Object, error) {
@@ -626,15 +633,108 @@ func createMapModule(getMapData func() *wad.MapData) map[string]tengo.Object {
 			th := &m.Things[thingID]
 			res := &tengo.Map{
 				Value: map[string]tengo.Object{
-					"id":    &tengo.Int{Value: int64(thingID)},
-					"x":     &tengo.Int{Value: int64(th.X)},
-					"y":     &tengo.Int{Value: int64(th.Y)},
-					"angle": &tengo.Int{Value: int64(th.Angle)},
-					"type":  &tengo.Int{Value: int64(th.Type)},
-					"flags": &tengo.Int{Value: int64(th.Flags)},
+					"id":      &tengo.Int{Value: int64(thingID)},
+					"x":       &tengo.Int{Value: int64(th.X)},
+					"y":       &tengo.Int{Value: int64(th.Y)},
+					"angle":   &tengo.Int{Value: int64(th.Angle)},
+					"type":    &tengo.Int{Value: int64(th.Type)},
+					"flags":   &tengo.Int{Value: int64(th.Flags)},
+					"is_item": toBool(wad.IsItem(th.Type)),
 				},
 			}
 			return res, nil
+		},
+	}
+
+	numItemsFunc := &tengo.UserFunction{
+		Name: "num_items",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return &tengo.Int{Value: 0}, nil
+			}
+			items := wad.ParseMapItems(m)
+			return &tengo.Int{Value: int64(len(items))}, nil
+		},
+	}
+
+	isItemFunc := &tengo.UserFunction{
+		Name: "is_item",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			if len(args) == 0 {
+				return nil, fmt.Errorf("is_item: missing thing_type")
+			}
+			tType, err := toInt(args[0], "thing_type")
+			if err != nil {
+				return nil, err
+			}
+			if wad.IsItem(int16(tType)) {
+				return tengo.TrueValue, nil
+			}
+			return tengo.FalseValue, nil
+		},
+	}
+
+	getItemFunc := &tengo.UserFunction{
+		Name: "get_item",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return tengo.UndefinedValue, nil
+			}
+			if len(args) == 0 {
+				return nil, fmt.Errorf("get_item: missing item_id")
+			}
+			itemID, err := toInt(args[0], "item_id")
+			if err != nil {
+				return nil, err
+			}
+			items := wad.ParseMapItems(m)
+			if itemID < 0 || itemID >= len(items) {
+				return tengo.UndefinedValue, nil
+			}
+			it := items[itemID]
+			return &tengo.Map{
+				Value: map[string]tengo.Object{
+					"id":        &tengo.Int{Value: int64(it.ID)},
+					"x":         &tengo.Int{Value: int64(it.X)},
+					"y":         &tengo.Int{Value: int64(it.Y)},
+					"floor_z":   &tengo.Float{Value: it.FloorZ},
+					"type":      &tengo.Int{Value: int64(it.Def.Type)},
+					"name":      &tengo.String{Value: it.Def.Name},
+					"category":  &tengo.String{Value: it.Def.Category.String()},
+					"sprite":    &tengo.String{Value: it.Def.Sprite},
+					"collected": toBool(it.Collected),
+				},
+			}, nil
+		},
+	}
+
+	getItemsFunc := &tengo.UserFunction{
+		Name: "get_items",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			m, err := getMap()
+			if err != nil {
+				return &tengo.Array{}, nil
+			}
+			items := wad.ParseMapItems(m)
+			var res []tengo.Object
+			for _, it := range items {
+				res = append(res, &tengo.Map{
+					Value: map[string]tengo.Object{
+						"id":        &tengo.Int{Value: int64(it.ID)},
+						"x":         &tengo.Int{Value: int64(it.X)},
+						"y":         &tengo.Int{Value: int64(it.Y)},
+						"floor_z":   &tengo.Float{Value: it.FloorZ},
+						"type":      &tengo.Int{Value: int64(it.Def.Type)},
+						"name":      &tengo.String{Value: it.Def.Name},
+						"category":  &tengo.String{Value: it.Def.Category.String()},
+						"sprite":    &tengo.String{Value: it.Def.Sprite},
+						"collected": toBool(it.Collected),
+					},
+				})
+			}
+			return &tengo.Array{Value: res}, nil
 		},
 	}
 
@@ -969,6 +1069,17 @@ func createMapModule(getMapData func() *wad.MapData) map[string]tengo.Object {
 		"GetPlayer":                    getPlayerFunc,
 		"get_vertex":                   getVertexFunc,
 		"GetVertex":                    getVertexFunc,
+
+		// Items
+		"num_items":                    numItemsFunc,
+		"NumItems":                     numItemsFunc,
+		"item_count":                   numItemsFunc,
+		"get_item":                     getItemFunc,
+		"GetItem":                      getItemFunc,
+		"get_items":                    getItemsFunc,
+		"GetItems":                     getItemsFunc,
+		"is_item":                      isItemFunc,
+		"IsItem":                       isItemFunc,
 	}
 }
 

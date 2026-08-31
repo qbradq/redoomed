@@ -97,6 +97,7 @@ type TextureManager struct {
 	textureDefs map[string]TextureDef
 	textures    map[string]*Texture
 	flats       map[string]*Flat
+	patches     map[string]*Patch
 }
 
 // NewTextureManager creates and initializes a TextureManager from the given WAD.
@@ -110,6 +111,7 @@ func NewTextureManager(w *WAD) (*TextureManager, error) {
 		textureDefs: make(map[string]TextureDef),
 		textures:    make(map[string]*Texture),
 		flats:       make(map[string]*Flat),
+		patches:     make(map[string]*Patch),
 	}
 
 	// 1. Load PLAYPAL (palette 0)
@@ -387,6 +389,30 @@ func (tm *TextureManager) GetFlat(name string) (*Flat, error) {
 
 	tm.flats[upper] = flat
 	return flat, nil
+}
+
+// GetPatch returns the Doom Picture Patch with the given lump name, caching it in memory.
+func (tm *TextureManager) GetPatch(name string) (*Patch, error) {
+	upper := strings.ToUpper(strings.TrimSpace(name))
+	if upper == "" || upper == "-" {
+		return nil, ErrInvalidPatch
+	}
+
+	if p, ok := tm.patches[upper]; ok {
+		return p, nil
+	}
+
+	if tm.wad == nil {
+		return nil, errors.New("cannot load patch: nil WAD")
+	}
+
+	patch, err := tm.wad.GetPatch(upper)
+	if err != nil {
+		return nil, err
+	}
+
+	tm.patches[upper] = patch
+	return patch, nil
 }
 
 // PreloadMap preloads and caches all wall textures and flats referenced by a MapData.

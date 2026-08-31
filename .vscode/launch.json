@@ -10,7 +10,7 @@
             "request": "launch",
             "mode": "auto",
             "args": [
-                "--iwad=./DoomShareware.wad"
+                "--iwad=./doom1.wad"
             ],
             "env": {},
             "program": "${workspaceFolder}"

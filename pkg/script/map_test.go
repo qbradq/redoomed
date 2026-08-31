@@ -303,3 +303,55 @@ s0_after := m.get_sidedef(0)
 	}
 }
 
+func TestMapModuleItems(t *testing.T) {
+	mapData := createTestMapData()
+	mapData.Things = append(mapData.Things,
+		wad.Thing{X: 120, Y: 140, Angle: 0, Type: wad.ThingKeyBlueCard},
+		wad.Thing{X: 160, Y: 180, Angle: 0, Type: wad.ThingArmorBonus},
+	)
+
+	repl := NewREPL(nil, nil)
+	repl.SetMapDataProvider(func() *wad.MapData {
+		return mapData
+	})
+
+	code := `
+m := import("map")
+n_items := m.num_items()
+is_key := m.is_item(5)
+is_p1 := m.is_item(1)
+it0 := m.get_item(0)
+all_items := m.get_items()
+`
+	_, err := repl.Eval(code)
+	if err != nil {
+		t.Fatalf("Eval failed: %v", err)
+	}
+
+	res, err := repl.Eval("n_items")
+	if err != nil || res != "2" {
+		t.Errorf("expected 2 items, got %q", res)
+	}
+
+	res, err = repl.Eval("is_key")
+	if err != nil || res != "true" {
+		t.Errorf("expected is_item(5) to be true, got %q", res)
+	}
+
+	res, err = repl.Eval("is_p1")
+	if err != nil || res != "false" {
+		t.Errorf("expected is_item(1) to be false, got %q", res)
+	}
+
+	res, err = repl.Eval("it0.name")
+	if err != nil || (res != `"Blue Keycard"` && res != "Blue Keycard") {
+		t.Errorf("expected item 0 name 'Blue Keycard', got %q", res)
+	}
+
+	res, err = repl.Eval("len(all_items)")
+	if err != nil || res != "2" {
+		t.Errorf("expected 2 items in all_items, got %q", res)
+	}
+}
+
+

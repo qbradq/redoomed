@@ -392,6 +392,7 @@ func (l *HUDLayer) PlayerStats() *player.PlayerStats {
 type MiniMapLayer struct {
 	visible     bool
 	mapData     *wad.MapData
+	items       []*wad.ItemEntity
 	playerX     float64
 	playerY     float64
 	playerAngle float64
@@ -417,6 +418,16 @@ func NewMiniMapLayer(mapData *wad.MapData) *MiniMapLayer {
 }
 
 func (l *MiniMapLayer) Name() string { return "Mini map" }
+
+// SetItems sets the items displayed on the mini map.
+func (l *MiniMapLayer) SetItems(items []*wad.ItemEntity) {
+	l.items = items
+}
+
+// Items returns the slice of item entities on the mini map.
+func (l *MiniMapLayer) Items() []*wad.ItemEntity {
+	return l.items
+}
 
 // ZoomIn multiplies the zoom factor by the given amount.
 func (l *MiniMapLayer) ZoomIn(factor float64) {
@@ -501,10 +512,11 @@ func (l *MiniMapLayer) Update() (bool, error) {
 	return consumed, nil
 }
 
-// SetMapData assigns new map data and initializes the player start position.
+// SetMapData assigns new map data and initializes the player start position and map items.
 func (l *MiniMapLayer) SetMapData(m *wad.MapData) {
 	l.mapData = m
 	if m != nil {
+		l.items = wad.ParseMapItems(m)
 		if p1, ok := m.Player1Start(); ok {
 			l.playerX = float64(p1.X)
 			l.playerY = float64(p1.Y)
@@ -514,6 +526,7 @@ func (l *MiniMapLayer) SetMapData(m *wad.MapData) {
 			l.hasPlayer = false
 		}
 	} else {
+		l.items = nil
 		l.hasPlayer = false
 	}
 }
@@ -541,7 +554,7 @@ func (l *MiniMapLayer) PlayerPosition() (x, y, angle float64) {
 	return l.playerX, l.playerY, l.playerAngle
 }
 
-// Draw renders the vector line map and the player directional arrow onto the 320x200 buffer.
+// Draw renders the vector line map, item markers, and the player directional arrow onto the 320x200 buffer.
 func (l *MiniMapLayer) Draw(screen *ebiten.Image) {
 	if !l.visible {
 		return
@@ -636,7 +649,39 @@ func (l *MiniMapLayer) Draw(screen *ebiten.Image) {
 		vector.StrokeLine(screen, x1, y1, x2, y2, 1.0, clr, false)
 	}
 
-	// 4. Draw player green arrow
+	// 4. Draw collectible items (triangles / small diamonds)
+	for _, item := range l.items {
+		if item == nil || item.Collected {
+			continue
+		}
+
+		ix, iy := worldToScreen(item.X, item.Y)
+		if ix < 0 || ix >= 320 || iy < 0 || iy >= 168 {
+			continue
+		}
+
+		var itemColor = gfx.EGABrightYellow
+		switch item.Def.Category {
+		case wad.ItemCategoryKey:
+			itemColor = gfx.EGABrightCyan
+		case wad.ItemCategoryHealth:
+			itemColor = gfx.EGABrightGreen
+		case wad.ItemCategoryArmor:
+			itemColor = gfx.EGACyan
+		case wad.ItemCategoryAmmo:
+			itemColor = gfx.EGABrightYellow
+		case wad.ItemCategoryWeapon:
+			itemColor = gfx.EGABrightMagenta
+		case wad.ItemCategoryPowerup:
+			itemColor = gfx.EGABrightWhite
+		}
+
+		// Draw small plus mark for item
+		vector.StrokeLine(screen, ix-1.5, iy, ix+1.5, iy, 1.0, itemColor, false)
+		vector.StrokeLine(screen, ix, iy-1.5, ix, iy+1.5, 1.0, itemColor, false)
+	}
+
+	// 5. Draw player green arrow
 	if l.hasPlayer {
 		px, py := worldToScreen(l.playerX, l.playerY)
 
@@ -681,6 +726,7 @@ func (l *MiniMapLayer) PreventsLowerDrawing() bool { return true }
 type LevelViewLayer struct {
 	visible        bool
 	mapData        *wad.MapData
+	items          []*wad.ItemEntity
 	renderer       *render.Renderer
 	cam            render.Camera
 	playerActor    *physics.Actor
@@ -707,10 +753,21 @@ func (l *LevelViewLayer) SetOnCrossLinedef(fn func(lineIdx int, ld *wad.Linedef)
 	l.onCrossLinedef = fn
 }
 
-// SetMapData updates the active map data and initializes the camera from Player 1 start.
+// SetItems sets the items tracked by the level view layer.
+func (l *LevelViewLayer) SetItems(items []*wad.ItemEntity) {
+	l.items = items
+}
+
+// Items returns the items tracked by the level view layer.
+func (l *LevelViewLayer) Items() []*wad.ItemEntity {
+	return l.items
+}
+
+// SetMapData updates the active map data, initializes items, and initializes the camera from Player 1 start.
 func (l *LevelViewLayer) SetMapData(m *wad.MapData) {
 	l.mapData = m
 	if m != nil {
+		l.items = wad.ParseMapItems(m)
 		if p1, ok := m.Player1Start(); ok {
 			l.playerActor = physics.NewPlayerActor(float64(p1.X), float64(p1.Y), 0, float64(p1.Angle))
 			l.hasPlayer = true
@@ -727,6 +784,7 @@ func (l *LevelViewLayer) SetMapData(m *wad.MapData) {
 			l.hasPlayer = false
 		}
 	} else {
+		l.items = nil
 		l.hasPlayer = false
 	}
 }
@@ -812,6 +870,7 @@ func (l *LevelViewLayer) Draw(screen *ebiten.Image) {
 	if !l.visible || l.mapData == nil {
 		return
 	}
+	l.renderer.SetItems(l.items)
 	l.renderer.Render(screen, l.mapData, &l.cam)
 }
 

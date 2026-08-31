@@ -3,6 +3,7 @@ package render
 import (
 	"image/color"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -68,10 +69,16 @@ type Renderer struct {
 	ceilingClip []int
 	floorClip   []int
 
+	// 2D depth buffer for precise per-pixel occlusion between walls, floors, ceilings, and sprites
+	depthBuffer []float64
+
 	// Queued 2-sided masked segs (window grates, iron bars) for back-to-front rendering pass
 	maskedSegs       []maskedSeg
 	maskedClipTop    []int
 	maskedClipBottom []int
+
+	// Active item entities for Thing rendering
+	items []*wad.ItemEntity
 
 	// Pixel RGBA buffer for fast WritePixels
 	pixels []byte
@@ -106,6 +113,11 @@ func NewRenderer(viewWidth, viewHeight, bufHeight int) *Renderer {
 		colCos[x] = math.Cos(angle)
 	}
 
+	depthBuf := make([]float64, viewWidth*bufHeight)
+	for i := range depthBuf {
+		depthBuf[i] = math.MaxFloat64
+	}
+
 	return &Renderer{
 		viewWidth:   viewWidth,
 		viewHeight:  viewHeight,
@@ -118,6 +130,7 @@ func NewRenderer(viewWidth, viewHeight, bufHeight int) *Renderer {
 		colCos:      colCos,
 		ceilingClip: make([]int, viewWidth),
 		floorClip:   make([]int, viewWidth),
+		depthBuffer: depthBuf,
 		pixels:      make([]byte, viewWidth*bufHeight*4),
 	}
 }
@@ -145,16 +158,33 @@ func (r *Renderer) SetDimensions(viewWidth, viewHeight, bufHeight int) {
 
 	r.ceilingClip = make([]int, viewWidth)
 	r.floorClip = make([]int, viewWidth)
+	r.depthBuffer = make([]float64, viewWidth*bufHeight)
+	for i := range r.depthBuffer {
+		r.depthBuffer[i] = math.MaxFloat64
+	}
 	r.pixels = make([]byte, viewWidth*bufHeight*4)
 }
 
-// Clear fills the pixel buffer with a solid background color.
+// SetItems updates the active map item entities for Thing rendering.
+func (r *Renderer) SetItems(items []*wad.ItemEntity) {
+	r.items = items
+}
+
+// Items returns the active map item entities.
+func (r *Renderer) Items() []*wad.ItemEntity {
+	return r.items
+}
+
+// Clear fills the pixel buffer with a solid background color and resets the depth buffer.
 func (r *Renderer) Clear(c color.RGBA) {
 	for i := 0; i < len(r.pixels); i += 4 {
 		r.pixels[i] = c.R
 		r.pixels[i+1] = c.G
 		r.pixels[i+2] = c.B
 		r.pixels[i+3] = c.A
+	}
+	for i := range r.depthBuffer {
+		r.depthBuffer[i] = math.MaxFloat64
 	}
 }
 
@@ -176,10 +206,13 @@ func (r *Renderer) Render(target *ebiten.Image, mapData *wad.MapData, cam *Camer
 		return
 	}
 
-	// 1. Clear 1D column occlusion clipping buffer and clear view area
+	// 1. Clear 1D column occlusion clipping buffer, depth buffer, and clear view area
 	for x := 0; x < r.viewWidth; x++ {
 		r.ceilingClip[x] = -1
 		r.floorClip[x] = r.viewHeight
+	}
+	for i := 0; i < r.viewWidth*r.viewHeight; i++ {
+		r.depthBuffer[i] = math.MaxFloat64
 	}
 
 	// Clear viewport pixels (black)
@@ -219,7 +252,10 @@ func (r *Renderer) Render(target *ebiten.Image, mapData *wad.MapData, cam *Camer
 	// 4. Draw masked segs (2-sided middle textures like grates/bars) back-to-front
 	r.drawMaskedSegs(mapData, cam)
 
-	// 5. Upload rendered pixel buffer to target image
+	// 5. Draw things (sprites/billboards) back-to-front
+	r.drawThings(mapData, cam)
+
+	// 6. Upload rendered pixel buffer to target image
 	target.WritePixels(r.pixels)
 }
 
@@ -639,6 +675,7 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 						clr = color.RGBA{R: 120, G: 120, B: 120, A: 255}
 					}
 					r.setPixel(x, y, clr)
+					r.depthBuffer[y*r.viewWidth+x] = tz
 				}
 			}
 
@@ -711,6 +748,7 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 								clr = color.RGBA{R: 100, G: 100, B: 100, A: 255}
 							}
 							r.setPixel(x, y, clr)
+							r.depthBuffer[y*r.viewWidth+x] = tz
 						}
 					}
 				}
@@ -783,6 +821,7 @@ func (r *Renderer) renderSeg(mapData *wad.MapData, cam *Camera, seg *wad.Seg) {
 							clr = color.RGBA{R: 80, G: 80, B: 80, A: 255}
 						}
 						r.setPixel(x, y, clr)
+						r.depthBuffer[y*r.viewWidth+x] = tz
 					}
 				}
 
@@ -937,6 +976,11 @@ func (r *Renderer) drawMaskedSegs(mapData *wad.MapData, cam *Camera) {
 				}
 
 				for y := wallTop; y <= wallBottom; y++ {
+					idx := y*r.viewWidth + x
+					if tz >= r.depthBuffer[idx] {
+						continue
+					}
+
 					texV := int(math.Floor(topZ - (cam.Z - (float64(y)-r.centerY)/scale)))
 					if texV < 0 || texV >= ms.midTex.Height {
 						continue
@@ -951,6 +995,7 @@ func (r *Renderer) drawMaskedSegs(mapData *wad.MapData, cam *Camera) {
 							clr = color.RGBA{R: 200, G: 200, B: 200, A: 255}
 						}
 						r.setPixel(x, y, clr)
+						r.depthBuffer[idx] = tz
 					}
 				}
 			}
@@ -1039,6 +1084,7 @@ func (r *Renderer) drawCeilingSpan(cam *Camera, x, yStart, yEnd int, ceilH float
 		cmIdx := texMgr.LightToColormap(lightLevel, dist)
 		clr := palette[texMgr.MapColor(cmIdx, palIdx)]
 		r.setPixel(x, y, clr)
+		r.depthBuffer[y*r.viewWidth+x] = dist
 	}
 }
 
@@ -1083,5 +1129,200 @@ func (r *Renderer) drawFloorSpan(cam *Camera, x, yStart, yEnd int, floorH float6
 		cmIdx := texMgr.LightToColormap(lightLevel, dist)
 		clr := palette[texMgr.MapColor(cmIdx, palIdx)]
 		r.setPixel(x, y, clr)
+		r.depthBuffer[y*r.viewWidth+x] = dist
+	}
+}
+
+type spriteThing struct {
+	x, y   float64
+	floorZ float64
+	radius float64
+	tx, tz float64
+	sprite string
+}
+
+// drawThings renders all visible map Things and items as camera-facing billboards,
+// sorted back-to-front and clipped against solid wall geometry and colormap attenuation.
+func (r *Renderer) drawThings(mapData *wad.MapData, cam *Camera) {
+	if mapData == nil {
+		return
+	}
+
+	texMgr := mapData.Textures
+	palette := [256]color.RGBA{}
+	if texMgr != nil {
+		palette = texMgr.PaletteRGBA()
+	}
+
+	var thingsToRender []spriteThing
+
+	rad := cam.Angle * math.Pi / 180.0
+	cosA := math.Cos(rad)
+	sinA := math.Sin(rad)
+
+	// 1. Gather collectible items (if items tracked)
+	if len(r.items) > 0 {
+		for _, item := range r.items {
+			if item == nil || item.Collected {
+				continue
+			}
+			sprite := item.Def.Sprite
+			if sprite == "" {
+				continue
+			}
+			dx := item.X - cam.X
+			dy := item.Y - cam.Y
+			tz := dx*cosA + dy*sinA
+			if tz < 1.0 {
+				continue
+			}
+			tx := dx*sinA - dy*cosA
+			radius := item.Radius
+			if radius <= 0 {
+				radius = 20.0
+			}
+			thingsToRender = append(thingsToRender, spriteThing{
+				x:      item.X,
+				y:      item.Y,
+				floorZ: item.FloorZ,
+				radius: radius,
+				tx:     tx,
+				tz:     tz,
+				sprite: sprite,
+			})
+		}
+	}
+
+	// 2. Gather remaining map Things (e.g. barrels, props, torches, or items if r.items is empty)
+	if len(mapData.Things) > 0 {
+		for _, th := range mapData.Things {
+			if len(r.items) > 0 && wad.IsItem(th.Type) {
+				continue
+			}
+			sprite, ok := wad.LookupThingSprite(th.Type)
+			if !ok || sprite == "" {
+				continue
+			}
+			txWorld := float64(th.X)
+			tyWorld := float64(th.Y)
+			dx := txWorld - cam.X
+			dy := tyWorld - cam.Y
+			tz := dx*cosA + dy*sinA
+			if tz < 1.0 {
+				continue
+			}
+			tx := dx*sinA - dy*cosA
+
+			floorZ := 0.0
+			if sec, ok := mapData.SectorAt(txWorld, tyWorld); ok && sec != nil {
+				floorZ = float64(sec.FloorHeight)
+			}
+
+			radius := 16.0
+			if def, ok := wad.LookupItemDef(th.Type); ok && def.Radius > 0 {
+				radius = def.Radius
+			}
+
+			thingsToRender = append(thingsToRender, spriteThing{
+				x:      txWorld,
+				y:      tyWorld,
+				floorZ: floorZ,
+				radius: radius,
+				tx:     tx,
+				tz:     tz,
+				sprite: sprite,
+			})
+		}
+	}
+
+	if len(thingsToRender) == 0 {
+		return
+	}
+
+	// Sort back-to-front (furthest depth tz drawn first)
+	sort.Slice(thingsToRender, func(i, j int) bool {
+		return thingsToRender[i].tz > thingsToRender[j].tz
+	})
+
+	for _, st := range thingsToRender {
+		var patch *wad.Patch
+		if texMgr != nil {
+			p, err := texMgr.GetPatch(st.sprite)
+			if err == nil {
+				patch = p
+			}
+		}
+		if patch == nil || patch.Width <= 0 || patch.Height <= 0 {
+			continue
+		}
+
+		scale := r.focalLength / st.tz
+		screenCenterX := r.centerX + (st.tx/st.tz)*r.focalLength
+
+		x1 := int(math.Round(screenCenterX - float64(patch.LeftOffset)*scale))
+		x2 := int(math.Round(screenCenterX + float64(patch.Width-patch.LeftOffset)*scale)) - 1
+		if x2 < 0 || x1 >= r.viewWidth {
+			continue
+		}
+
+		topZ := st.floorZ + float64(patch.TopOffset)
+		bottomZ := topZ - float64(patch.Height)
+
+		topY := int(math.Round(r.centerY - (topZ-cam.Z)*scale))
+		bottomY := int(math.Round(r.centerY - (bottomZ-cam.Z)*scale))
+
+		startX := clampInt(x1, 0, r.viewWidth-1)
+		endX := clampInt(x2, 0, r.viewWidth-1)
+		drawTop := clampInt(topY, 0, r.viewHeight-1)
+		drawBottom := clampInt(bottomY, 0, r.viewHeight-1)
+		if drawBottom < drawTop {
+			continue
+		}
+
+		lightLevel := 160
+		if sec, ok := mapData.SectorAt(st.x, st.y); ok && sec != nil {
+			lightLevel = int(sec.LightLevel)
+		}
+		cmIdx := 0
+		if texMgr != nil {
+			cmIdx = texMgr.LightToColormap(lightLevel, st.tz)
+		}
+
+		patchLeftWorld := screenCenterX - float64(patch.LeftOffset)*scale
+		patchTopWorld := r.centerY - (topZ-cam.Z)*scale
+		depthThreshold := st.tz - st.radius
+
+		for x := startX; x <= endX; x++ {
+			texU := int(math.Floor((float64(x) - patchLeftWorld) / scale))
+			if texU < 0 || texU >= patch.Width {
+				continue
+			}
+
+			for y := drawTop; y <= drawBottom; y++ {
+				idx := y*r.viewWidth + x
+				if depthThreshold >= r.depthBuffer[idx] {
+					continue
+				}
+
+				texV := int(math.Floor((float64(y) - patchTopWorld) / scale))
+				if texV < 0 || texV >= patch.Height {
+					continue
+				}
+
+				palIdx, opaque := patch.PixelAt(texU, texV)
+				if !opaque {
+					continue
+				}
+
+				var clr color.RGBA
+				if texMgr != nil {
+					clr = palette[texMgr.MapColor(cmIdx, palIdx)]
+				} else {
+					clr = color.RGBA{R: 200, G: 200, B: 200, A: 255}
+				}
+				r.setPixel(x, y, clr)
+				r.depthBuffer[idx] = st.tz
+			}
+		}
 	}
 }

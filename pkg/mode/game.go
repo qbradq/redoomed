@@ -27,6 +27,7 @@ type GameMode struct {
 	bgColor color.RGBA
 	onLog   func(string)
 	onTriggerLineSpecial func(special, lineID, secID, thingID, tag int)
+	onItemPickup         func(item *wad.ItemEntity, msg string)
 
 	playerStats *player.PlayerStats
 
@@ -74,8 +75,23 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 
 	if mapData != nil {
 		levelView.SetMapData(mapData)
+		miniMap.SetItems(levelView.Items())
 		levelView.SetVisible(true)
 		intermission.SetVisible(false)
+	}
+
+	g := &GameMode{
+		mapName:           mapName,
+		wadFile:           w,
+		buffer:            ebiten.NewImage(GameBufferWidth, GameBufferHeight),
+		bgColor:           color.RGBA{R: 0, G: 0, B: 0, A: 255},
+		playerStats:       playerStats,
+		commonLayer:       common,
+		gameMenuLayer:     menu,
+		hudLayer:          hud,
+		miniMapLayer:      miniMap,
+		levelViewLayer:    levelView,
+		intermissionLayer: intermission,
 	}
 
 	controls := NewGameControlsLayer(func() {
@@ -84,6 +100,7 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 
 	controls.SetOnMovePlayer(func(forward, strafe, turn float64) {
 		levelView.MovePlayer(forward, strafe, turn)
+		g.CheckItemPickups()
 		cam := levelView.Camera()
 		if cam != nil {
 			miniMap.SetPlayer(cam.X, cam.Y, cam.Angle)
@@ -106,22 +123,8 @@ func NewGameMode(mapName string, w *wad.WAD, onToggleConsole func()) *GameMode {
 		levelView,
 		intermission,
 	}
-
-	g := &GameMode{
-		mapName:           mapName,
-		wadFile:           w,
-		buffer:            ebiten.NewImage(GameBufferWidth, GameBufferHeight),
-		bgColor:           color.RGBA{R: 0, G: 0, B: 0, A: 255},
-		playerStats:       playerStats,
-		layers:            layers,
-		commonLayer:       common,
-		gameMenuLayer:     menu,
-		gameControlsLayer: controls,
-		hudLayer:          hud,
-		miniMapLayer:      miniMap,
-		levelViewLayer:    levelView,
-		intermissionLayer: intermission,
-	}
+	g.layers = layers
+	g.gameControlsLayer = controls
 
 	controls.SetOnUse(func() {
 		g.Use()
@@ -164,6 +167,7 @@ func (g *GameMode) SetMapName(name string) {
 		if md, err := g.wadFile.LoadMap(name); err == nil {
 			g.miniMapLayer.SetMapData(md)
 			g.levelViewLayer.SetMapData(md)
+			g.miniMapLayer.SetItems(g.levelViewLayer.Items())
 			g.levelViewLayer.SetVisible(true)
 			g.miniMapLayer.SetVisible(false)
 			g.intermissionLayer.SetVisible(false)
@@ -246,6 +250,17 @@ func (g *GameMode) IntermissionLayer() *IntermissionLayer {
 	return g.intermissionLayer
 }
 
+// Items returns the current active map items tracked by the engine.
+func (g *GameMode) Items() []*wad.ItemEntity {
+	if g.levelViewLayer != nil {
+		return g.levelViewLayer.Items()
+	}
+	if g.miniMapLayer != nil {
+		return g.miniMapLayer.Items()
+	}
+	return nil
+}
+
 // SetOnToggleConsole updates the console toggle handler in the common layer.
 func (g *GameMode) SetOnToggleConsole(fn func()) {
 	if g.commonLayer != nil {
@@ -266,6 +281,45 @@ func (g *GameMode) SetOnTriggerLineSpecial(fn func(special, lineID, secID, thing
 	}
 }
 
+// SetOnItemPickup sets the callback invoked when the player collects an item.
+func (g *GameMode) SetOnItemPickup(fn func(item *wad.ItemEntity, msg string)) {
+	g.onItemPickup = fn
+}
+
+// CheckItemPickups checks whether the player touches any uncollected items, applies their benefits, and notifies listeners.
+func (g *GameMode) CheckItemPickups() []*wad.ItemEntity {
+	if g.playerStats == nil || g.levelViewLayer == nil {
+		return nil
+	}
+	actor := g.levelViewLayer.Player()
+	if actor == nil {
+		return nil
+	}
+
+	var pickedUp []*wad.ItemEntity
+	items := g.levelViewLayer.Items()
+	for _, item := range items {
+		if item == nil || item.Collected {
+			continue
+		}
+		if physics.CheckItemTouch(actor, item) {
+			if ok, msg := g.playerStats.TryPickupItem(item.Def.Type); ok {
+				item.Collected = true
+				pickedUp = append(pickedUp, item)
+				if msg != "" {
+					log.Print(msg)
+					if g.onLog != nil {
+						g.onLog(msg)
+					}
+					if g.onItemPickup != nil {
+						g.onItemPickup(item, msg)
+					}
+				}
+			}
+		}
+	}
+	return pickedUp
+}
 
 // Use triggers a line interaction check in front of the player, prints a debug message,
 // and invokes any associated line special function.
@@ -323,6 +377,7 @@ func (g *GameMode) Update() error {
 			consumed = true
 		}
 	}
+	g.CheckItemPickups()
 	return nil
 }
 
