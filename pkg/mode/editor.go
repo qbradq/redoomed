@@ -2,17 +2,43 @@ package mode
 
 import (
 	"fmt"
+	"image"
 	"image/color"
+	_ "image/png"
 	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
+	"github.com/qbradq/redoomed/pkg/data"
 	"github.com/qbradq/redoomed/pkg/font"
 	"github.com/qbradq/redoomed/pkg/gfx"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
+
+var editorIconsImage *ebiten.Image
+
+// loadEditorIcons loads the 128x128 icons atlas from pkg/data/gfx/editor_icons.png.
+func loadEditorIcons() (*ebiten.Image, error) {
+	if editorIconsImage != nil {
+		return editorIconsImage, nil
+	}
+
+	f, err := data.FS.Open("gfx/editor_icons.png")
+	if err != nil {
+		return nil, fmt.Errorf("failed to open editor_icons.png: %w", err)
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode editor_icons.png: %w", err)
+	}
+
+	editorIconsImage = ebiten.NewImageFromImage(img)
+	return editorIconsImage, nil
+}
 
 const (
 	// EditorBufferWidth is the logical width of the editor mode (640).
@@ -80,12 +106,31 @@ var ZoomScales = [12]float64{
 	32.0,       // Level 11: 32 pixels per map unit
 }
 
+// EditMode represents the active editing sub-mode.
+type EditMode int
+
+const (
+	// EditModeVertex is the vertex editing mode (on by default).
+	EditModeVertex EditMode = iota
+	// EditModeLine is the linedef editing mode.
+	EditModeLine
+	// EditModeSector is the sector editing mode.
+	EditModeSector
+	// EditModeThing is the thing/entity editing mode.
+	EditModeThing
+)
+
 // IconButton represents a single 16x16 icon button slot in the user panel.
 type IconButton struct {
-	Index   int
-	Hovered bool
-	Active  bool
-	Tooltip string
+	Index    int
+	Icon     int
+	Visible  bool
+	Enabled  bool
+	IsToggle bool
+	Active   bool
+	Hovered  bool
+	Tooltip  string
+	OnClick  func(*EditorMode)
 }
 
 // EditorMode represents the 640x400 map editor mode composited to the screen.
@@ -97,9 +142,11 @@ type EditorMode struct {
 	lastMapData     *wad.MapData
 	hasCenteredCam  bool
 	font            *font.ConsoleFont
+	iconsImage      *ebiten.Image
 
 	gridSize  int
 	zoomLevel int
+	editMode  EditMode
 
 	// Camera world position (map units) centered in the editing window
 	camX float64
@@ -122,24 +169,180 @@ type EditorMode struct {
 
 // NewEditorMode creates and initializes a new EditorMode instance.
 func NewEditorMode(f *font.ConsoleFont, w *wad.WAD) *EditorMode {
+	icons, _ := loadEditorIcons()
+
 	ed := &EditorMode{
-		buffer:    ebiten.NewImage(EditorBufferWidth, EditorBufferHeight),
-		wadFile:   w,
-		font:      f,
-		gridSize:  DefaultGridSize,
-		zoomLevel: DefaultZoomLevel,
-		camX:      0,
-		camY:      0,
+		buffer:     ebiten.NewImage(EditorBufferWidth, EditorBufferHeight),
+		wadFile:    w,
+		font:       f,
+		iconsImage: icons,
+		gridSize:   DefaultGridSize,
+		zoomLevel:  DefaultZoomLevel,
+		editMode:   EditModeVertex,
+		camX:       0,
+		camY:       0,
 	}
 
-	for i := 0; i < NumIconButtons; i++ {
-		ed.buttons[i] = IconButton{
+	ed.initButtons()
+	return ed
+}
+
+// initButtons populates the 15 user panel button slots.
+func (e *EditorMode) initButtons() {
+	// Button 0: New map button. Icon 0. Disabled.
+	e.buttons[0] = IconButton{
+		Index:   0,
+		Icon:    0,
+		Visible: true,
+		Enabled: false,
+		Tooltip: "New Map",
+	}
+
+	// Button 1: Open map button. Icon 1. Disabled.
+	e.buttons[1] = IconButton{
+		Index:   1,
+		Icon:    1,
+		Visible: true,
+		Enabled: false,
+		Tooltip: "Open Map",
+	}
+
+	// Button 2: Save map button. Icon 2. Disabled.
+	e.buttons[2] = IconButton{
+		Index:   2,
+		Icon:    2,
+		Visible: true,
+		Enabled: false,
+		Tooltip: "Save Map",
+	}
+
+	// The next 4 buttons are a group of toggle buttons (Radio group: exactly one active at all times)
+	// Button 3: Vertex mode button. Icon 3. Enabled, on by default.
+	e.buttons[3] = IconButton{
+		Index:    3,
+		Icon:     3,
+		Visible:  true,
+		Enabled:  true,
+		IsToggle: true,
+		Active:   true,
+		Tooltip:  "Vertex Mode",
+	}
+
+	// Button 4: Line mode button. Icon 4. Enabled, off by default.
+	e.buttons[4] = IconButton{
+		Index:    4,
+		Icon:     4,
+		Visible:  true,
+		Enabled:  true,
+		IsToggle: true,
+		Active:   false,
+		Tooltip:  "Line Mode",
+	}
+
+	// Button 5: Sector mode button. Icon 5. Enabled, off by default.
+	e.buttons[5] = IconButton{
+		Index:    5,
+		Icon:     5,
+		Visible:  true,
+		Enabled:  true,
+		IsToggle: true,
+		Active:   false,
+		Tooltip:  "Sector Mode",
+	}
+
+	// Button 6: Thing mode button. Icon 6. Enabled, off by default.
+	e.buttons[6] = IconButton{
+		Index:    6,
+		Icon:     6,
+		Visible:  true,
+		Enabled:  true,
+		IsToggle: true,
+		Active:   false,
+		Tooltip:  "Thing Mode",
+	}
+
+	// Button 7: Zoom In button. Icon 7. Enabled. Zooms in.
+	e.buttons[7] = IconButton{
+		Index:   7,
+		Icon:    7,
+		Visible: true,
+		Enabled: true,
+		Tooltip: "Zoom In",
+		OnClick: func(ed *EditorMode) {
+			ed.IncreaseZoom()
+		},
+	}
+
+	// Button 8: Zoom Out button. Icon 8. Enabled. Zooms out.
+	e.buttons[8] = IconButton{
+		Index:   8,
+		Icon:    8,
+		Visible: true,
+		Enabled: true,
+		Tooltip: "Zoom Out",
+		OnClick: func(ed *EditorMode) {
+			ed.DecreaseZoom()
+		},
+	}
+
+	// Button 9: Increase grid size. Icon 9. Enabled. Increases grid size.
+	e.buttons[9] = IconButton{
+		Index:   9,
+		Icon:    9,
+		Visible: true,
+		Enabled: true,
+		Tooltip: "Increase Grid Size",
+		OnClick: func(ed *EditorMode) {
+			ed.IncreaseGridSize()
+		},
+	}
+
+	// Button 10: Decrease grid size. Icon 10. Enabled. Decreases grid size.
+	e.buttons[10] = IconButton{
+		Index:   10,
+		Icon:    10,
+		Visible: true,
+		Enabled: true,
+		Tooltip: "Decrease Grid Size",
+		OnClick: func(ed *EditorMode) {
+			ed.DecreaseGridSize()
+		},
+	}
+
+	// Unused button slots (11..14) are not drawn
+	for i := 11; i < NumIconButtons; i++ {
+		e.buttons[i] = IconButton{
 			Index:   i,
-			Tooltip: fmt.Sprintf("Tool %d", i+1),
+			Icon:    -1,
+			Visible: false,
 		}
 	}
+}
 
-	return ed
+// EditMode returns the currently active editing mode.
+func (e *EditorMode) EditMode() EditMode {
+	return e.editMode
+}
+
+// SetEditMode updates the active editing mode and synchronizes the toggle buttons.
+func (e *EditorMode) SetEditMode(m EditMode) {
+	e.editMode = m
+	for i := 3; i <= 6; i++ {
+		e.buttons[i].Active = (i-3 == int(m))
+	}
+}
+
+// Button returns the icon button state at the specified slot index (0..14).
+func (e *EditorMode) Button(index int) IconButton {
+	if index < 0 || index >= NumIconButtons {
+		return IconButton{}
+	}
+	return e.buttons[index]
+}
+
+// Buttons returns all 15 icon button slot definitions.
+func (e *EditorMode) Buttons() [NumIconButtons]IconButton {
+	return e.buttons
 }
 
 // SetWAD updates the WAD container reference for the editor.
@@ -431,11 +634,32 @@ func (e *EditorMode) Update() error {
 		e.CenterOnMap()
 	}
 
-	// Update button hover states
+	// Update button hover states and handle click events
+	leftClick := inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft)
+
 	for i := 0; i < NumIconButtons; i++ {
+		if !e.buttons[i].Visible {
+			e.buttons[i].Hovered = false
+			continue
+		}
+
 		bx := UserPanelX + i*IconButtonSize
 		by := UserPanelY
-		e.buttons[i].Hovered = (mx >= bx && mx < bx+IconButtonSize && my >= by && my < by+IconButtonSize)
+		isHovered := (mx >= bx && mx < bx+IconButtonSize && my >= by && my < by+IconButtonSize)
+		e.buttons[i].Hovered = isHovered
+
+		if isHovered && leftClick && e.buttons[i].Enabled {
+			if e.buttons[i].IsToggle {
+				// Radio-group behavior: exactly one toggle button active at all times
+				for j := 3; j <= 6; j++ {
+					e.buttons[j].Active = (j == i)
+				}
+				e.editMode = EditMode(i - 3)
+			}
+			if e.buttons[i].OnClick != nil {
+				e.buttons[i].OnClick(e)
+			}
+		}
 	}
 
 	return nil
@@ -543,22 +767,31 @@ func (e *EditorMode) drawEditingWindow(dst *ebiten.Image) {
 	}
 }
 
-// drawUserPanel renders the 240x392 dark gray panel with 15x1 16x16 icon buttons at the top.
+// drawUserPanel renders the 240x392 dark gray panel with 16x16 icon buttons at the top.
 func (e *EditorMode) drawUserPanel(dst *ebiten.Image) {
 	// Fill user panel background with dark gray
 	vector.DrawFilledRect(dst, UserPanelX, UserPanelY, UserPanelWidth, UserPanelHeight, gfx.EGADarkGray, false)
 
-	// Draw 15x1 array of 16x16 icon buttons
+	if e.iconsImage == nil {
+		e.iconsImage, _ = loadEditorIcons()
+	}
+
+	// Draw array of 16x16 icon buttons
 	btnBorderColor := color.RGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xFF}
 	btnHoverColor := color.RGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xFF}
 	btnNormalColor := color.RGBA{R: 0x44, G: 0x44, B: 0x44, A: 0xFF}
 
 	for i := 0; i < NumIconButtons; i++ {
+		btn := e.buttons[i]
+		if !btn.Visible || btn.Icon < 0 {
+			continue
+		}
+
 		bx := float32(UserPanelX + i*IconButtonSize)
 		by := float32(UserPanelY)
 
 		btnBg := btnNormalColor
-		if e.buttons[i].Hovered {
+		if btn.Hovered && btn.Enabled {
 			btnBg = btnHoverColor
 		}
 
@@ -567,6 +800,29 @@ func (e *EditorMode) drawUserPanel(dst *ebiten.Image) {
 
 		// Button border
 		vector.StrokeRect(dst, bx, by, IconButtonSize, IconButtonSize, 1.0, btnBorderColor, false)
+
+		// Draw icon with color tinting
+		if e.iconsImage != nil {
+			srcX := (btn.Icon % 8) * 16
+			srcY := (btn.Icon / 8) * 16
+			sub := e.iconsImage.SubImage(image.Rect(srcX, srcY, srcX+16, srcY+16)).(*ebiten.Image)
+
+			op := &ebiten.DrawImageOptions{}
+			op.GeoM.Translate(float64(bx), float64(by))
+
+			if !btn.Enabled {
+				// Draw tinted dark gray when disabled (85/255)
+				op.ColorScale.Scale(85.0/255.0, 85.0/255.0, 85.0/255.0, 1.0)
+			} else if btn.IsToggle && btn.Active {
+				// When a toggle button is on, draw tinted bright / lime green
+				op.ColorScale.Scale(85.0/255.0, 1.0, 85.0/255.0, 1.0)
+			} else {
+				// Draw tinted white when enabled
+				op.ColorScale.Scale(1.0, 1.0, 1.0, 1.0)
+			}
+
+			dst.DrawImage(sub, op)
+		}
 	}
 }
 

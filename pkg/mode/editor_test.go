@@ -2,11 +2,13 @@ package mode
 
 import (
 	"fmt"
+	"image"
 	"math"
 	"testing"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
+	"github.com/qbradq/redoomed/pkg/data"
 	"github.com/qbradq/redoomed/pkg/font"
 	"github.com/qbradq/redoomed/pkg/wad"
 )
@@ -35,6 +37,42 @@ func TestEditorModeDefaults(t *testing.T) {
 	if ed.CamX() != 0 || ed.CamY() != 0 {
 		t.Errorf("expected camera at (0, 0), got (%f, %f)", ed.CamX(), ed.CamY())
 	}
+}
+
+func TestLoadEditorIcons(t *testing.T) {
+	img, err := loadEditorIcons()
+	if err != nil {
+		t.Fatalf("loadEditorIcons failed: %v", err)
+	}
+	if img == nil {
+		t.Fatal("expected non-nil editor icons image")
+	}
+	bounds := img.Bounds()
+	if bounds.Dx() != 128 || bounds.Dy() != 128 {
+		t.Errorf("expected 128x128 icons atlas, got %dx%d", bounds.Dx(), bounds.Dy())
+	}
+
+	f, err := data.FS.Open("gfx/editor_icons.png")
+	if err != nil {
+		t.Fatalf("open editor_icons.png: %v", err)
+	}
+	defer f.Close()
+	rawImg, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatalf("decode editor_icons.png: %v", err)
+	}
+	// Check non-empty pixels in icon 0 (0..15, 0..15)
+	var nonZeroCount int
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			r, g, b, a := rawImg.At(x, y).RGBA()
+			if a > 0 {
+				nonZeroCount++
+				t.Logf("Pixel (%d, %d): R=%d G=%d B=%d A=%d", x, y, r>>8, g>>8, b>>8, a>>8)
+			}
+		}
+	}
+	t.Logf("Icon 0 non-zero alpha pixels: %d / 256", nonZeroCount)
 }
 
 func TestEditorGridSizeDoublingAndHalving(t *testing.T) {
@@ -198,14 +236,155 @@ func TestEditorButtonsAndCallbacks(t *testing.T) {
 		t.Error("expected onToggleConsole callback to have been called")
 	}
 
-	// Verify icon button array
-	if len(ed.buttons) != NumIconButtons {
-		t.Fatalf("expected %d buttons, got %d", NumIconButtons, len(ed.buttons))
+	// Verify icon button array length
+	buttons := ed.Buttons()
+	if len(buttons) != NumIconButtons {
+		t.Fatalf("expected %d buttons, got %d", NumIconButtons, len(buttons))
 	}
-	for i := 0; i < NumIconButtons; i++ {
-		if ed.buttons[i].Index != i {
-			t.Errorf("button %d index mismatch: %d", i, ed.buttons[i].Index)
+}
+
+func TestEditorButtonsPromptSpecifications(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
+	}
+
+	ed := NewEditorMode(cf, nil)
+
+	// Button 0: New map button. Icon 0. Disabled.
+	b0 := ed.Button(0)
+	if b0.Icon != 0 || b0.Enabled != false || !b0.Visible {
+		t.Errorf("button 0 mismatch: %+v", b0)
+	}
+
+	// Button 1: Open map button. Icon 1. Disabled.
+	b1 := ed.Button(1)
+	if b1.Icon != 1 || b1.Enabled != false || !b1.Visible {
+		t.Errorf("button 1 mismatch: %+v", b1)
+	}
+
+	// Button 2: Save map button. Icon 2. Disabled.
+	b2 := ed.Button(2)
+	if b2.Icon != 2 || b2.Enabled != false || !b2.Visible {
+		t.Errorf("button 2 mismatch: %+v", b2)
+	}
+
+	// Button 3: Vertex mode button. Icon 3. Enabled, on by default.
+	b3 := ed.Button(3)
+	if b3.Icon != 3 || b3.Enabled != true || !b3.IsToggle || !b3.Active || !b3.Visible {
+		t.Errorf("button 3 mismatch: %+v", b3)
+	}
+
+	// Button 4: Line mode button. Icon 4. Enabled, off by default.
+	b4 := ed.Button(4)
+	if b4.Icon != 4 || b4.Enabled != true || !b4.IsToggle || b4.Active || !b4.Visible {
+		t.Errorf("button 4 mismatch: %+v", b4)
+	}
+
+	// Button 5: Sector mode button. Icon 5. Enabled, off by default.
+	b5 := ed.Button(5)
+	if b5.Icon != 5 || b5.Enabled != true || !b5.IsToggle || b5.Active || !b5.Visible {
+		t.Errorf("button 5 mismatch: %+v", b5)
+	}
+
+	// Button 6: Thing mode button. Icon 6. Enabled, off by default.
+	b6 := ed.Button(6)
+	if b6.Icon != 6 || b6.Enabled != true || !b6.IsToggle || b6.Active || !b6.Visible {
+		t.Errorf("button 6 mismatch: %+v", b6)
+	}
+
+	// Button 7: Zoom In button. Icon 7. Enabled. Zooms in.
+	b7 := ed.Button(7)
+	if b7.Icon != 7 || b7.Enabled != true || !b7.Visible || b7.OnClick == nil {
+		t.Errorf("button 7 mismatch: %+v", b7)
+	}
+	initialZoom := ed.ZoomLevel()
+	b7.OnClick(ed)
+	if ed.ZoomLevel() != initialZoom+1 {
+		t.Errorf("expected zoom level %d after zoom in, got %d", initialZoom+1, ed.ZoomLevel())
+	}
+
+	// Button 8: Zoom Out button. Icon 8. Enabled. Zooms out.
+	b8 := ed.Button(8)
+	if b8.Icon != 8 || b8.Enabled != true || !b8.Visible || b8.OnClick == nil {
+		t.Errorf("button 8 mismatch: %+v", b8)
+	}
+	b8.OnClick(ed)
+	if ed.ZoomLevel() != initialZoom {
+		t.Errorf("expected zoom level %d after zoom out, got %d", initialZoom, ed.ZoomLevel())
+	}
+
+	// Button 9: Increase grid size. Icon 9. Enabled.
+	b9 := ed.Button(9)
+	if b9.Icon != 9 || b9.Enabled != true || !b9.Visible || b9.OnClick == nil {
+		t.Errorf("button 9 mismatch: %+v", b9)
+	}
+	initialGrid := ed.GridSize()
+	b9.OnClick(ed)
+	if ed.GridSize() != initialGrid*2 {
+		t.Errorf("expected grid size %d after increase, got %d", initialGrid*2, ed.GridSize())
+	}
+
+	// Button 10: Decrease grid size. Icon 10. Enabled.
+	b10 := ed.Button(10)
+	if b10.Icon != 10 || b10.Enabled != true || !b10.Visible || b10.OnClick == nil {
+		t.Errorf("button 10 mismatch: %+v", b10)
+	}
+	b10.OnClick(ed)
+	if ed.GridSize() != initialGrid {
+		t.Errorf("expected grid size %d after decrease, got %d", initialGrid, ed.GridSize())
+	}
+
+	// Buttons 11..14: Unused, not visible
+	for i := 11; i < NumIconButtons; i++ {
+		btn := ed.Button(i)
+		if btn.Visible || btn.Icon != -1 {
+			t.Errorf("expected unused button %d to be invisible with icon -1, got %+v", i, btn)
 		}
+	}
+}
+
+func TestEditorToggleGroupBehavior(t *testing.T) {
+	cf, err := font.NewConsoleFont()
+	if err != nil {
+		t.Fatalf("failed to load font: %v", err)
+	}
+
+	ed := NewEditorMode(cf, nil)
+
+	// Default mode: Vertex
+	if ed.EditMode() != EditModeVertex {
+		t.Errorf("expected default mode Vertex, got %v", ed.EditMode())
+	}
+	if !ed.Button(3).Active || ed.Button(4).Active || ed.Button(5).Active || ed.Button(6).Active {
+		t.Error("expected only Vertex mode button to be active")
+	}
+
+	// Switch to Line Mode
+	ed.SetEditMode(EditModeLine)
+	if ed.EditMode() != EditModeLine {
+		t.Errorf("expected mode Line, got %v", ed.EditMode())
+	}
+	if ed.Button(3).Active || !ed.Button(4).Active || ed.Button(5).Active || ed.Button(6).Active {
+		t.Error("expected only Line mode button to be active")
+	}
+
+	// Switch to Sector Mode
+	ed.SetEditMode(EditModeSector)
+	if ed.EditMode() != EditModeSector {
+		t.Errorf("expected mode Sector, got %v", ed.EditMode())
+	}
+	if ed.Button(3).Active || ed.Button(4).Active || !ed.Button(5).Active || ed.Button(6).Active {
+		t.Error("expected only Sector mode button to be active")
+	}
+
+	// Switch to Thing Mode
+	ed.SetEditMode(EditModeThing)
+	if ed.EditMode() != EditModeThing {
+		t.Errorf("expected mode Thing, got %v", ed.EditMode())
+	}
+	if ed.Button(3).Active || ed.Button(4).Active || ed.Button(5).Active || !ed.Button(6).Active {
+		t.Error("expected only Thing mode button to be active")
 	}
 }
 
