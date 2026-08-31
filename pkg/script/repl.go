@@ -32,6 +32,7 @@ type REPL struct {
 	onGetMusicTrack  func() string
 	onGetMapData     func() *wad.MapData
 	onGetPlayerStats func() *player.PlayerStats
+	onSetNoClip      func(bool)
 	printFunc        func(string)
 }
 
@@ -49,6 +50,24 @@ func NewREPL(onExit func(), printFunc func(string)) *REPL {
 	// Reserve a slot in symbol table for capturing expression results
 	sym := r.symbolTable.Define(resultVarName)
 	r.resIndex = sym.Index
+
+	noClipFunc := &tengo.UserFunction{
+		Name: "no_clip",
+		Value: func(args ...tengo.Object) (tengo.Object, error) {
+			enabled := true
+			if len(args) > 0 {
+				if bVal, ok := args[0].(*tengo.Bool); ok {
+					enabled = !bVal.IsFalsy()
+				} else if iVal, ok := args[0].(*tengo.Int); ok {
+					enabled = iVal.Value != 0
+				}
+			}
+			if r.onSetNoClip != nil {
+				r.onSetNoClip(enabled)
+			}
+			return tengo.UndefinedValue, nil
+		},
+	}
 
 	startMapFunc := &tengo.UserFunction{
 		Name: "StartMap",
@@ -136,6 +155,9 @@ func NewREPL(onExit func(), printFunc func(string)) *REPL {
 				return tengo.UndefinedValue, nil
 			},
 		},
+		"no_clip":          noClipFunc,
+		"NoClip":           noClipFunc,
+		"noclip":           noClipFunc,
 		"StartMap":         startMapFunc,
 		"start_map":        startMapFunc,
 		"PlayMusic":        playMusicFunc,
@@ -188,6 +210,13 @@ func (r *REPL) SetPlayerStatsProvider(fn func() *player.PlayerStats) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.onGetPlayerStats = fn
+}
+
+// SetSetNoClipFunc updates the noclip toggle callback for the "game" module.
+func (r *REPL) SetSetNoClipFunc(fn func(bool)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onSetNoClip = fn
 }
 
 // Cache returns the script cache instance.

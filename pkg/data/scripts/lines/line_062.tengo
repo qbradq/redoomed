@@ -1,0 +1,64 @@
+fmt := import("fmt")
+map := import("map")
+times := import("times")
+
+// active_plats tracks platforms currently in motion
+active_plats := {}
+
+operate_platform := func(sec_id) {
+	key := string(sec_id)
+	if active_plats[key] {
+		return
+	}
+	active_plats[key] = true
+
+	sec := map.get_sector(sec_id)
+	if sec == undefined {
+		active_plats[key] = false
+		return
+	}
+
+	orig_floor := sec.floor_height
+	dest_floor := map.get_lowest_adjacent_floor(sec_id)
+
+	// 1. Lower platform floor to lowest adjacent floor (2 units per tick)
+	for sec.floor_height > dest_floor {
+		new_h := sec.floor_height - 2
+		if new_h < dest_floor {
+			new_h = dest_floor
+		}
+		map.set_sector_floor_height(sec_id, new_h)
+		times.sleep(28 * times.millisecond)
+		sec = map.get_sector(sec_id)
+	}
+
+	// 2. Wait 3 seconds
+	times.sleep(3000 * times.millisecond)
+
+	// 3. Raise platform back to original floor height
+	for sec.floor_height < orig_floor {
+		new_h := sec.floor_height + 2
+		if new_h > orig_floor {
+			new_h = orig_floor
+		}
+		map.set_sector_floor_height(sec_id, new_h)
+		times.sleep(28 * times.millisecond)
+		sec = map.get_sector(sec_id)
+	}
+
+	active_plats[key] = false
+}
+
+// Line special 62: SR Plat Down Wait Up Stay (Switch Repeatable Platform/Lift)
+line_special_062 := func(line_id, sec_id, thing_id, tag) {
+	if tag != 0 {
+		sec_ids := map.find_sectors_by_tag(tag)
+		for s in sec_ids {
+			operate_platform(s)
+		}
+	} else if sec_id >= 0 {
+		operate_platform(sec_id)
+	}
+}
+
+export line_special_062

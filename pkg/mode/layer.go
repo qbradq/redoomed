@@ -731,6 +731,7 @@ type LevelViewLayer struct {
 	cam            render.Camera
 	playerActor    *physics.Actor
 	hasPlayer      bool
+	noClip         bool
 	onCrossLinedef func(lineIdx int, ld *wad.Linedef)
 }
 
@@ -770,6 +771,7 @@ func (l *LevelViewLayer) SetMapData(m *wad.MapData) {
 		l.items = wad.ParseMapItems(m)
 		if p1, ok := m.Player1Start(); ok {
 			l.playerActor = physics.NewPlayerActor(float64(p1.X), float64(p1.Y), 0, float64(p1.Angle))
+			l.playerActor.NoClip = l.noClip
 			l.hasPlayer = true
 			if sec, ok := m.SectorAt(l.playerActor.X, l.playerActor.Y); ok && sec != nil {
 				l.playerActor.FloorZ = float64(sec.FloorHeight)
@@ -804,6 +806,19 @@ func (l *LevelViewLayer) Player() *physics.Actor {
 	return l.playerActor
 }
 
+// NoClip returns whether noclip mode is currently active.
+func (l *LevelViewLayer) NoClip() bool {
+	return l.noClip
+}
+
+// SetNoClip sets the noclip mode for player movement.
+func (l *LevelViewLayer) SetNoClip(enabled bool) {
+	l.noClip = enabled
+	if l.playerActor != nil {
+		l.playerActor.NoClip = enabled
+	}
+}
+
 // SetCamera updates the camera position and angle.
 func (l *LevelViewLayer) SetCamera(x, y, z, angle float64) {
 	l.cam.X = x
@@ -813,12 +828,14 @@ func (l *LevelViewLayer) SetCamera(x, y, z, angle float64) {
 	l.hasPlayer = true
 	if l.playerActor == nil {
 		l.playerActor = physics.NewPlayerActor(x, y, z, angle)
+		l.playerActor.NoClip = l.noClip
 	} else {
 		l.playerActor.X = x
 		l.playerActor.Y = y
 		l.playerActor.Z = z
 		l.playerActor.Angle = angle
 		l.playerActor.FloorZ = z - l.playerActor.EyeHeight
+		l.playerActor.NoClip = l.noClip
 	}
 }
 

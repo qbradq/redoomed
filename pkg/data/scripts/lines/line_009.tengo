@@ -1,0 +1,105 @@
+fmt := import("fmt")
+map := import("map")
+times := import("times")
+
+// active_donuts tracks sectors currently in donut motion
+active_donuts := {}
+
+do_donut := func(sec_id) {
+	key := string(sec_id)
+	if active_donuts[key] {
+		return
+	}
+	active_donuts[key] = true
+
+	s1 := map.get_sector(sec_id)
+	if s1 == undefined {
+		active_donuts[key] = false
+		return
+	}
+
+	adj1 := map.get_adjacent_sectors(sec_id)
+	if len(adj1) == 0 {
+		active_donuts[key] = false
+		return
+	}
+
+	s2_id := adj1[0]
+	s2 := map.get_sector(s2_id)
+	if s2 == undefined {
+		active_donuts[key] = false
+		return
+	}
+
+	// Find surrounding neighbor sector s3 (adjacent to s2, excluding s1)
+	adj2 := map.get_adjacent_sectors(s2_id)
+	s3_id := -1
+	for neighbor in adj2 {
+		if neighbor != sec_id {
+			s3_id = neighbor
+			break
+		}
+	}
+
+	if s3_id < 0 {
+		active_donuts[key] = false
+		return
+	}
+
+	s3 := map.get_sector(s3_id)
+	if s3 == undefined {
+		active_donuts[key] = false
+		return
+	}
+
+	dest_floor := s3.floor_height
+	dest_floor_pic := s3.floor_pic
+
+	// s1 (central pillar) lowers to dest_floor
+	// s2 (intermediate pool) raises to dest_floor
+	for s1.floor_height > dest_floor || s2.floor_height < dest_floor {
+		if s1.floor_height > dest_floor {
+			new_h1 := s1.floor_height - 1
+			if new_h1 < dest_floor {
+				new_h1 = dest_floor
+			}
+			map.set_sector_floor_height(sec_id, new_h1)
+		}
+
+		if s2.floor_height < dest_floor {
+			new_h2 := s2.floor_height + 1
+			if new_h2 > dest_floor {
+				new_h2 = dest_floor
+			}
+			map.set_sector_floor_height(s2_id, new_h2)
+		}
+
+		times.sleep(28 * times.millisecond)
+		s1 = map.get_sector(sec_id)
+		s2 = map.get_sector(s2_id)
+	}
+
+	// Apply texture and special change to intermediate sector (s2)
+	map.set_sector_floor_pic(s2_id, dest_floor_pic)
+	map.set_sector_special(s2_id, 0)
+
+	active_donuts[key] = false
+}
+
+// Line special 9: S1 Floor Donut (Pillar Lowers, Pool Rises and Changes Texture)
+line_special_009 := func(line_id, sec_id, thing_id, tag) {
+	if line_id >= 0 {
+		map.set_line_special(line_id, 0)
+	}
+
+	if tag != 0 {
+		sec_ids := map.find_sectors_by_tag(tag)
+		for s in sec_ids {
+			do_donut(s)
+		}
+	} else if sec_id >= 0 {
+		do_donut(sec_id)
+	}
+}
+
+export line_special_009

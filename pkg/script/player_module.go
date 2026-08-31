@@ -415,11 +415,31 @@ func createPlayerModule(getPlayerStats func() *player.PlayerStats) map[string]te
 			if len(args) == 0 {
 				return nil, fmt.Errorf("has_key: expected key argument")
 			}
-			k, err := parseKeyType(args[0])
+			ps, err := getStats()
 			if err != nil {
 				return nil, err
 			}
-			ps, err := getStats()
+			if str, ok := args[0].(*tengo.String); ok {
+				s := strings.ToLower(strings.TrimSpace(str.Value))
+				switch s {
+				case "blue":
+					if ps.HasKey(player.KeyBlueCard) || ps.HasKey(player.KeyBlueSkull) {
+						return tengo.TrueValue, nil
+					}
+					return tengo.FalseValue, nil
+				case "yellow":
+					if ps.HasKey(player.KeyYellowCard) || ps.HasKey(player.KeyYellowSkull) {
+						return tengo.TrueValue, nil
+					}
+					return tengo.FalseValue, nil
+				case "red":
+					if ps.HasKey(player.KeyRedCard) || ps.HasKey(player.KeyRedSkull) {
+						return tengo.TrueValue, nil
+					}
+					return tengo.FalseValue, nil
+				}
+			}
+			k, err := parseKeyType(args[0])
 			if err != nil {
 				return nil, err
 			}

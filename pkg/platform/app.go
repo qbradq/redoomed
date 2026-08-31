@@ -147,6 +147,11 @@ func NewAppWithIWAD(iwadPath string) *App {
 	repl.SetGetMusicTrackFunc(func() string {
 		return app.musicMgr.CurrentTrack()
 	})
+	repl.SetSetNoClipFunc(func(enabled bool) {
+		if app.gameMode != nil {
+			app.gameMode.SetNoClip(enabled)
+		}
+	})
 
 	app.gameMode.SetOnTriggerLineSpecial(func(special, lineID, secID, thingID, tag int) {
 		repl.TriggerLineSpecial(special, lineID, secID, thingID, tag)

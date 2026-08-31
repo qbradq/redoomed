@@ -492,5 +492,38 @@ func TestMaxFallSpeed(t *testing.T) {
 	}
 }
 
+func TestNoClipMovement(t *testing.T) {
+	// Map with a solid 1-sided wall between x < 0 and x > 0
+	mapData := createTwoSectorMap(0, 128, 0, 128, wad.LinedefBlocking, false)
+
+	// Player starting at (-50, 0)
+	actor := NewPlayerActor(-50, 0, 41, 0)
+	actor.FloorZ = 0
+	actor.CeilingZ = 128
+
+	// Normal mode: trying to cross the solid wall into x > 0 should fail
+	if TryMove(mapData, actor, 50, 0) {
+		t.Error("expected solid 1-sided wall to block movement in normal mode")
+	}
+
+	// Enable noclip mode
+	actor.NoClip = true
+
+	// With noclip: crossing through the solid wall should succeed
+	if !TryMove(mapData, actor, 50, 0) {
+		t.Error("expected noclip mode to allow walking through solid walls")
+	}
+	if actor.X != 50 || actor.Y != 0 {
+		t.Errorf("expected actor position (50, 0), got (%f, %f)", actor.X, actor.Y)
+	}
+
+	// Also verify SlideMove / Move in noclip mode
+	Move(mapData, actor, 20, 0, 0) // move forward 20 units (+X)
+	if actor.X != 70 {
+		t.Errorf("expected actor X to be 70 after forward movement, got %f", actor.X)
+	}
+}
+
+
 
 

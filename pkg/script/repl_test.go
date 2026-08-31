@@ -350,3 +350,40 @@ func TestPlayerModuleScripting(t *testing.T) {
 	}
 }
 
+func TestGameNoClip(t *testing.T) {
+	repl := NewREPL(nil, nil)
+
+	noClipState := false
+	repl.SetSetNoClipFunc(func(enabled bool) {
+		noClipState = enabled
+	})
+
+	// Test game.no_clip(true)
+	_, err := repl.Eval(`game := import("game"); game.no_clip(true)`)
+	if err != nil {
+		t.Fatalf("Eval(game.no_clip(true)) failed: %v", err)
+	}
+	if !noClipState {
+		t.Error("expected noclip to be enabled (true)")
+	}
+
+	// Test game.no_clip(false)
+	_, err = repl.Eval(`game.no_clip(false)`)
+	if err != nil {
+		t.Fatalf("Eval(game.no_clip(false)) failed: %v", err)
+	}
+	if noClipState {
+		t.Error("expected noclip to be disabled (false)")
+	}
+
+	// Test default game.no_clip() enables noclip
+	_, err = repl.Eval(`game.no_clip()`)
+	if err != nil {
+		t.Fatalf("Eval(game.no_clip()) failed: %v", err)
+	}
+	if !noClipState {
+		t.Error("expected noclip to be enabled (default)")
+	}
+}
+
+

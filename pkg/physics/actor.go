@@ -32,6 +32,7 @@ type Actor struct {
 	MaxFallSpeed  float64 // Terminal falling velocity (defaults to DefaultMaxFallSpeed)
 	IsMonster     bool    // Whether the actor is a monster (for monster-blocking lines)
 	NoGravity     bool    // Whether the actor ignores gravity (flying/floating monsters or projectiles)
+	NoClip        bool    // Whether the actor ignores wall and sector height collisions (Doom noclip mode)
 	OnGround      bool    // True if the actor is supported on the floor
 }
 

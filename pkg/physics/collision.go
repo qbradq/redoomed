@@ -118,6 +118,17 @@ func ApplyGravity(mapData *wad.MapData, actor *Actor) {
 		maxFall = DefaultMaxFallSpeed
 	}
 
+	if actor.NoClip {
+		if floorZ, ceilingZ, ok := SampleFloorCeiling(mapData, actor, actor.X, actor.Y); ok {
+			actor.FloorZ = floorZ
+			actor.CeilingZ = ceilingZ
+			actor.Z = floorZ + actor.EyeHeight
+			actor.VelZ = 0
+			actor.OnGround = true
+		}
+		return
+	}
+
 	if actor.NoGravity {
 		// Flying / floating entity: enforce floor and ceiling limits without gravity
 		if actor.Z < targetGroundZ {
@@ -198,6 +209,10 @@ func UpdateActorFloor(mapData *wad.MapData, actor *Actor) {
 func CheckPosition(mapData *wad.MapData, actor *Actor, targetX, targetY float64) (valid bool, floorZ float64, ceilingZ float64) {
 	if mapData == nil {
 		return true, actor.FloorZ, actor.CeilingZ
+	}
+	if actor != nil && actor.NoClip {
+		highestFloor, lowestCeiling, _ := SampleFloorCeiling(mapData, actor, targetX, targetY)
+		return true, highestFloor, lowestCeiling
 	}
 
 	// 1. Resync actor's current floor/ceiling state to handle moving sectors (lifts, crushers)
@@ -320,6 +335,13 @@ func TryMove(mapData *wad.MapData, actor *Actor, targetX, targetY float64) bool 
 	actor.CeilingZ = ceilingZ
 
 	groundZ := floorZ + actor.EyeHeight
+	if actor.NoClip {
+		actor.Z = groundZ
+		actor.OnGround = true
+		actor.VelZ = 0
+		return true
+	}
+
 	if floorZ > oldFloorZ {
 		// Stepped up onto higher floor
 		if actor.Z < groundZ {

@@ -286,6 +286,21 @@ func (g *GameMode) SetOnItemPickup(fn func(item *wad.ItemEntity, msg string)) {
 	g.onItemPickup = fn
 }
 
+// SetNoClip toggles noclip mode for the player in the level view layer.
+func (g *GameMode) SetNoClip(enabled bool) {
+	if g.levelViewLayer != nil {
+		g.levelViewLayer.SetNoClip(enabled)
+	}
+}
+
+// NoClip reports whether noclip mode is currently enabled.
+func (g *GameMode) NoClip() bool {
+	if g.levelViewLayer != nil {
+		return g.levelViewLayer.NoClip()
+	}
+	return false
+}
+
 // CheckItemPickups checks whether the player touches any uncollected items, applies their benefits, and notifies listeners.
 func (g *GameMode) CheckItemPickups() []*wad.ItemEntity {
 	if g.playerStats == nil || g.levelViewLayer == nil {
